@@ -127,9 +127,10 @@ export function noteName(hz) {
 export function recommendSa(summaries,library) {
   if (summaries.length!==3) inconclusive('Three samples are required.');
   for (const s of summaries) if (!Number.isFinite(s.median_hz)||s.median_hz<=0||s.voiced_seconds<1-1e-9||s.voiced_fraction<.7-1e-9||s.accepted_frames<20||s.spread_cents>80) inconclusive('Unreliable measurements.');
-  const [low,middle,high]=summaries.map(s=>s.median_hz);
-  if (cents(middle,low)<100) inconclusive(`Middle (${middle.toFixed(2)} Hz) is ${cents(middle,low).toFixed(0)} cents relative to Low (${low.toFixed(2)} Hz). Middle must be at least 100 cents (one semitone) higher. Change pitch, not loudness, and stay comfortable.`);
-  if (cents(high,middle)<100) inconclusive(`High (${high.toFixed(2)} Hz) is ${cents(high,middle).toFixed(0)} cents relative to Middle (${middle.toFixed(2)} Hz). High must be at least 100 cents (one semitone) higher. Do not strain.`);
+  const measured=summaries.map(s=>s.median_hz),middle=measured[1];
+  // Guided labels are subjective; retain them verbatim but estimate boundaries
+  // from actual extrema. Similar samples are not independent range evidence.
+  const low=Math.min(...measured),high=Math.max(...measured);
   const intervals=library.flatMap(a=>a.notes.map(n=>n.semitone_offset+12*n.octave_offset));
   const min=Math.min(...intervals),max=Math.max(...intervals),safeLow=low*2**(50/1200),safeHigh=high/2**(50/1200);
   const first=Math.ceil(69+12*Math.log2(safeLow/2**(min/12)/440)-1e-10);
@@ -141,11 +142,35 @@ export function recommendSa(summaries,library) {
   if (!candidates.length) inconclusive(`No safe semitone-grid Sa fits the full exercise range. Your measured low-to-high span is ${(cents(high,low)/100).toFixed(1)} semitones; these exercises need at least ${max-min+1} including the 50-cent safety margin at each edge. Do not strain to extend your voice.`);
   const best=Math.min(...candidates.map(c=>c.cost)),near=candidates.filter(c=>c.cost<=best+5+1e-9);
   const hz=near[0].hz;
-  return {sa_hz:hz,note_name:noteName(hz),low_hz:safeLow,high_hz:safeHigh,measured_hz:[low,middle,high],
-    explanation:`Measured low/middle/high: ${[low,middle,high].map(f=>f.toFixed(2)).join(' / ')} Hz. `+
+  return {sa_hz:hz,note_name:noteName(hz),low_hz:safeLow,high_hz:safeHigh,measured_hz:measured,
+    explanation:`Measured low/middle/high samples: ${measured.map(f=>f.toFixed(2)).join(' / ')} Hz. Boundaries use the lowest and highest actual measured pitches. `+
+    (Math.abs(cents(measured[1],measured[0]))<100||Math.abs(cents(measured[2],measured[1]))<100?'Some samples are similar in pitch; they remain valid measurements but give less evidence of distinct range regions. ':'')+
     `50-cent inward safety margins fit all ${min}–${max}-semitone exercises. `+
     (near.length>1?'Similar candidates are ambiguous; the lower safe tonic is selected within the five-cent ranking band. ':'The exercise midpoint is placed near your measured middle. ')+
     'Three short vowels give an approximate comfortable range, not a fixed personal Sa or an exhaustive vocal assessment.'};
+}
+export function exercisesWithinRange(recommendation,library) {
+  return library.filter(a=>buildTimeline(a,recommendation.sa_hz).notes.every(n=>
+    n.frequency>=recommendation.low_hz-1e-9&&n.frequency<=recommendation.high_hz+1e-9));
+}
+export function recommendPractice(summaries,library) {
+  let recommendation;
+  try { recommendation=recommendSa(summaries,library); }
+  catch(error) {
+    if (!error.message.includes('No safe semitone-grid Sa')) throw error;
+    // Fit an existing shorter exercise rather than extend the singer's range.
+    // Voice-quality, pitch-match and 50-cent safety thresholds stay unchanged.
+    for (const exercise of library) {
+      try { recommendation=recommendSa(summaries,[exercise]);break; }
+      catch(e) {if (!e.message.includes('No safe semitone-grid Sa')) throw e;}
+    }
+    if (!recommendation) inconclusive('No available exercise fits the measured range with safety margins. More comfortable-range evidence or a teacher-reviewed shorter exercise is needed; do not strain.');
+  }
+  const available=exercisesWithinRange(recommendation,library);
+  return {...recommendation,available_ids:available.map(a=>a.id),
+    explanation:recommendation.explanation+` Available within these boundaries: ${available.map(a=>a.name).join(', ')}. `+
+    (available.length<library.length?'Wider exercises are unavailable at this Sa because they extend outside the conservative measured range. ':'')+
+    'Listen to the trial Sa and confirm only if it feels comfortable.'};
 }
 export function buildTimeline(alankar,sa,bpm=72) {
   if (!Number.isFinite(sa)||sa<=0||!Number.isFinite(bpm)||bpm<30||bpm>180) throw Error('Invalid Sa or BPM');

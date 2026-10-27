@@ -1,5 +1,5 @@
 import {AudioEngine} from './audio.mjs';
-import {cents,reliable,quantile,summarizeSample,recommendSa,buildTimeline,compare,scoreSession,synthesizeTimeline,Smoother} from './core.mjs?v=calibration-order-2';
+import {cents,reliable,quantile,summarizeSample,recommendPractice,buildTimeline,compare,scoreSession,synthesizeTimeline,Smoother} from './core.mjs?v=comfortable-sa-3';
 const $=id=>document.getElementById(id);
 const prompts=[['Comfortable low','Sing a comfortably low “Aa” for three seconds. Do not strain.'],
   ['Comfortable middle','Sing “Aa” at your natural, comfortable middle pitch for three seconds.'],
@@ -112,7 +112,7 @@ function finishSample() {
     $('samples').children[state.stage].textContent=`${['Low','Middle','High'][state.stage]}: ${summary.median_hz.toFixed(2)} Hz · stability ${summary.stability_cents.toFixed(1)} cents · ${(summary.voiced_fraction*100).toFixed(0)}% reliable voice`;
     state.stage++;
     if (state.stage===3) {
-      state.recommendation=recommendSa(state.summaries,state.library);
+      state.recommendation=recommendPractice(state.summaries,state.library);
       $('saName').textContent=`Suggested Sa: ${state.recommendation.note_name} · ${state.recommendation.sa_hz.toFixed(2)} Hz`;
       $('range').textContent=`Conservative comfortable range: ${state.recommendation.low_hz.toFixed(1)}–${state.recommendation.high_hz.toFixed(1)} Hz`;
       $('explanation').textContent=state.recommendation.explanation;
@@ -128,6 +128,9 @@ function finishSample() {
 }
 function selection() {
   engine.stopPlayback();state.referenceComplete=false;
+  const allowed=state.recommendation?.available_ids;
+  for (const option of $('exercise').options) option.disabled=!!allowed&&!allowed.includes(state.library[Number(option.value)].id);
+  if ($('exercise').selectedOptions[0]?.disabled) $('exercise').value=String([...$('exercise').options].find(o=>!o.disabled)?.value??0);
   const bpm=Number($('bpm').value);
   if (!Number.isFinite(bpm)||bpm<40||bpm>120) {message('Choose a tempo between 40 and 120 BPM.',true);state.timeline=null;controls();return;}
   const alankar=state.library[Number($('exercise').value)];
@@ -150,6 +153,7 @@ async function play(isSa=false) {
 }
 async function start() {
   if (!state.referenceComplete||!state.sa||!state.timeline) return;
+  if (state.timeline.notes.some(n=>n.frequency<state.recommendation.low_hz-1e-9||n.frequency>state.recommendation.high_hz+1e-9)) {message('This exercise is outside the measured comfortable boundaries. Choose an available exercise.',true);return;}
   Object.assign(state,{observations:[],trace:[],processing:[],ages:[],dropped:0,frames:0,report:null});smoother.reset();
   if (!await open('practice')) return;
   state.sessionStart=engine.time+3*60/state.timeline.bpm;lastScore=-Infinity;

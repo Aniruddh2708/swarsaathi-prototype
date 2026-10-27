@@ -160,7 +160,7 @@ def main():
             expect(page.locator('#limitations')).to_contain_text('backgrounded')
             checks.append('Background visibility event marks practice incomplete and stops capture')
             # Reproduce the reported iPad range: clear voice, near-identical low
-            # and middle. Failed recommendation must never show confirm guidance.
+            # and middle. A short suitable exercise may fit; wider ones must not.
             close_page=context.new_page()
             close_page.on('pageerror',lambda e:errors.append(str(e)))
             close_page.goto(args.base_url)
@@ -170,12 +170,18 @@ def main():
                 close_page.evaluate('(hz)=>fixture.frequency(hz)',hz)
                 close_page.locator('#record').click()
                 expect(close_page.locator('#samples li').nth(stage)).not_to_contain_text('not recorded',timeout=7000)
-            expect(close_page.locator('#stageName')).to_have_text('No Sa recommended yet')
-            expect(close_page.locator('#sampleStatus')).to_contain_text('Middle')
-            expect(close_page.locator('#sampleStatus')).to_contain_text('100 cents')
-            assert close_page.locator('#recommendation').is_hidden()
-            assert close_page.locator('#recordProgress').evaluate('(e)=>e.value')==0
-            checks.append('Reported near-identical low/middle input explains rejection without misleading confirmation')
+            expect(close_page.locator('#recommendation')).to_be_visible()
+            expect(close_page.locator('#saName')).to_contain_text('233.08 Hz')
+            expect(close_page.locator('#explanation')).to_contain_text('Wider exercises are unavailable')
+            close_page.locator('#confirm').click()
+            expect(close_page.locator('#setup')).to_be_visible()
+            # Check native option properties: this runner's is_disabled()
+            # reports false for OPTION even when its HTML disabled flag is true.
+            expect(close_page.locator('#exercise option').nth(0)).to_have_js_property('disabled',False)
+            expect(close_page.locator('#exercise option').nth(1)).to_have_js_property('disabled',True)
+            expect(close_page.locator('#exercise option').nth(2)).to_have_js_property('disabled',True)
+            expect(close_page.locator('#sequence')).to_have_text('Sa → Re → Ga → Re → Sa')
+            checks.append('Similar low/middle measurements recommend trial Sa 233.08 Hz and restrict out-of-range exercises')
             assert not errors, errors
             browser.close()
         result = dict(successful=True, checks=checks, page_errors=errors)

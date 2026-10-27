@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {performance} from 'node:perf_hooks';
-import {detect,differenceFFT,differenceReference,cents,Smoother,summarizeSample,recommendSa,buildTimeline,
+import {detect,differenceFFT,differenceReference,cents,Smoother,summarizeSample,recommendSa,recommendPractice,buildTimeline,
   compare,scoreSession,synthesizeTimeline} from '../core.mjs';
 const library=JSON.parse(readFileSync(new URL('../../data/alankars.json',import.meta.url)));
 const tone=(hz,rate=44100,n=4096)=>Float32Array.from({length:n},(_,i)=>.25*Math.sin(2*Math.PI*hz*i/rate));
@@ -78,12 +78,29 @@ test('isolated good pitch readings do not imply a sustained accepted sample',()=
     frequency:i===100?121.1:null,quality:i===100?.9:0,voiced:i===100}));
   assert.throws(()=>summarizeSample(rows),/Reliable voice: 0.01 s.*1 accepted frames/);
 });
-test('measured close low/middle samples explain rejection despite good coverage',()=>{
+test('close low/middle samples yield a measured trial Sa for a suitable existing exercise',()=>{
   const summaries=[221.90,223.57,321.32].map(measured);
   assert.ok(summaries.every(s=>s.voiced_fraction>.99));
-  assert.throws(()=>recommendSa(summaries,library),/Middle.*13 cents.*100 cents/);
-  const ordered=[summaries[0],{...summaries[1],median_hz:260},summaries[2]];
-  assert.throws(()=>recommendSa(ordered,library),/span is 6.4 semitones.*at least 8/);
+  assert.throws(()=>recommendSa(summaries,library),/span is 6.4 semitones.*at least 8/);
+  const result=recommendPractice(summaries,library);
+  assert.ok(Math.abs(result.sa_hz-233.081880759)<1e-6);
+  assert.deepEqual(result.available_ids,['alankar_1']);
+  assert.ok(result.explanation.includes('similar'));
+  for(const n of buildTimeline(library[0],result.sa_hz).notes) assert.ok(n.frequency>=result.low_hz&&n.frequency<=result.high_hz);
+  assert.ok(buildTimeline(library[1],result.sa_hz).notes.some(n=>n.frequency>result.high_hz));
+  assert.deepEqual(result.measured_hz,summaries.map(s=>s.median_hz));
+});
+test('similar samples are not forced apart, while too-narrow or poor evidence stays inconclusive',()=>{
+  const low=measured(221.9),high=measured(321.32);
+  assert.deepEqual(recommendPractice([low,low,high],library).available_ids,['alankar_1']);
+  const swapped=recommendPractice([measured(223.57),low,high],library);
+  assert.ok(Math.abs(swapped.sa_hz-233.081880759)<1e-6);
+  assert.ok(swapped.measured_hz[0]>swapped.measured_hz[1]);
+  assert.ok(swapped.explanation.includes('lowest and highest actual measured'));
+  assert.throws(()=>recommendPractice([low,low,low],library),/No available exercise/);
+  assert.throws(()=>recommendPractice([{...low,voiced_fraction:.2},low,high],library),/Unreliable/);
+  const broad=[130,130,310].map(measured);
+  assert.equal(recommendPractice(broad,library).available_ids.length,3);
 });
 test('perfect, wrong, sharp, flat, missed and silent tracks have transparent scores',()=>{
   for (const [variant,expected] of [['correct',100],['wrong',0],['sharp',0],['flat',0],['missing',80],['silent',0]])
