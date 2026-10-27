@@ -111,7 +111,9 @@ export function summarizeSample(observations) {
     const left=Math.max(start,o.timestamp-hop/2),right=Math.min(end,o.timestamp+hop/2);
     voiced+=Math.max(0,right-Math.max(left,previous)); previous=Math.max(previous,right);
   }
-  if (accepted.length<20||voiced<1-1e-9||voiced/usable<.7-1e-9) inconclusive('Not enough sustained reliable voice. Check input level and sing steadily.');
+  if (accepted.length<20||voiced<1-1e-9||voiced/usable<.7-1e-9) inconclusive(
+    `Reliable voice: ${voiced.toFixed(2)} s (${(100*voiced/usable).toFixed(0)}% of the usable clip; ${accepted.length} accepted frames). `+
+    'Need at least 1.00 s, 70% coverage and 20 accepted frames. Hold one comfortable steady “Aa” throughout recording. A single good Hz reading is not enough.');
   const hz=median(accepted.map(o=>o.frequency)),errors=accepted.map(o=>cents(o.frequency,hz));
   const spread=quantile(errors,.9)-quantile(errors,.1);
   if (spread>80) inconclusive(`Pitch is unstable (${spread.toFixed(0)}-cent spread).`);

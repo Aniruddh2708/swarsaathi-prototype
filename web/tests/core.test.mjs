@@ -66,12 +66,17 @@ test('real DSP observations drive conservative calibration and octave-repeatable
 });
 test('calibration rejects silent, short, unstable and narrow-range evidence',()=>{
   const silent=Array.from({length:250},(_,i)=>({timestamp:i*.012,frequency:null,voiced:false,quality:0}));
-  assert.throws(()=>summarizeSample(silent),/inconclusive/);
+  assert.throws(()=>summarizeSample(silent),/Reliable voice: 0.00 s.*0%.*70%/);
   assert.throws(()=>summarizeSample(silent.slice(0,10)),/inconclusive/);
   const unstable=silent.map((o,i)=>({...o,frequency:i%2?150:200,quality:.99,voiced:true}));
   assert.throws(()=>summarizeSample(unstable),/unstable/);
   const summary=measured(220);
   assert.throws(()=>recommendSa([summary,{...summary,median_hz:240},{...summary,median_hz:260}],library),/inconclusive/);
+});
+test('isolated good pitch readings do not imply a sustained accepted sample',()=>{
+  const rows=Array.from({length:250},(_,i)=>({timestamp:i*.012,
+    frequency:i===100?121.1:null,quality:i===100?.9:0,voiced:i===100}));
+  assert.throws(()=>summarizeSample(rows),/Reliable voice: 0.01 s.*1 accepted frames/);
 });
 test('perfect, wrong, sharp, flat, missed and silent tracks have transparent scores',()=>{
   for (const [variant,expected] of [['correct',100],['wrong',0],['sharp',0],['flat',0],['missing',80],['silent',0]])

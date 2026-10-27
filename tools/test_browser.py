@@ -76,12 +76,17 @@ def main():
             page.locator('#record').click()
             expect(page.locator('#message')).to_contain_text('inconclusive', timeout=7000)
             expect(page.locator('#stage')).to_have_text('SAMPLE 1 OF 3')
+            expect(page.locator('#sampleStatus')).to_contain_text('Sample not accepted')
+            expect(page.locator('#sampleStatus')).to_contain_text('70% coverage')
+            assert page.locator('#recordProgress').evaluate('(element)=>element.value') == 0
+            expect(page.locator('#detected')).to_contain_text('Microphone stopped')
             checks.append('Actual silent audio through the worklet rejects calibration')
             page.evaluate('fixture.silence(false)')
             for stage, hz in enumerate([130, 195, 310]):
                 page.evaluate('(hz)=>fixture.frequency(hz)', hz)
                 page.locator('#record').click()
                 expect(page.locator('#samples li').nth(stage)).not_to_contain_text('not recorded', timeout=7000)
+                expect(page.locator('#sampleStatus')).to_contain_text('sample accepted')
             expect(page.locator('#recommendation')).to_be_visible()
             assert errors == [], errors
             checks.append('Three synthesized vowels traverse live capture/YIN and yield measured Sa')

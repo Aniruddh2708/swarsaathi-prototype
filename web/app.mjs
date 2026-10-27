@@ -1,5 +1,5 @@
 import {AudioEngine} from './audio.mjs';
-import {cents,reliable,quantile,summarizeSample,recommendSa,buildTimeline,compare,scoreSession,synthesizeTimeline,Smoother} from './core.mjs';
+import {cents,reliable,quantile,summarizeSample,recommendSa,buildTimeline,compare,scoreSession,synthesizeTimeline,Smoother} from './core.mjs?v=calibration-feedback-1';
 const $=id=>document.getElementById(id);
 const prompts=[['Comfortable low','Sing a comfortably low “Aa” for three seconds. Do not strain.'],
   ['Comfortable middle','Sing “Aa” at your natural, comfortable middle pitch for three seconds.'],
@@ -34,7 +34,7 @@ function stageUI() {
 function reset() {
   stopAudio();Object.assign(state,{mode:'idle',stage:0,summaries:[],calibration:[],stageRows:[],recommendation:null,sa:null,referenceComplete:false,report:null});
   $('samples').replaceChildren(...['Low','Middle','High'].map(name=>{const li=document.createElement('li');li.textContent=`${name}: not recorded`;return li;}));
-  $('recordProgress').value=0;stageUI();show('calibration');message('Record three new comfortable samples. Never strain to reach a note.');
+  $('recordProgress').value=0;$('sampleStatus').textContent='';stageUI();show('calibration');message('Record three new comfortable samples. Never strain to reach a note.');
 }
 function stopAudio() {
   engine.stopPlayback();engine.close();clearInterval(timer);timer=null;
@@ -90,15 +90,19 @@ function onPitch(data) {
 async function record() {
   if (state.stage>=3) return;
   state.stageRows=[];
+  $('recordProgress').value=0;$('sampleStatus').textContent='Opening the microphone…';
   if (!await open('calibration')) return;
   state.recordStart=engine.time;
+  $('sampleStatus').textContent='Recording now. Hold one steady, comfortable “Aa” until the recording finishes.';
   message(`Recording ${prompts[state.stage][0].toLowerCase()}. Sing steadily for three seconds.`);
 }
 function finishSample() {
   engine.close();clearInterval(timer);state.mode='idle';
+  $('level').value=0;$('detected').textContent='Microphone stopped — see sample result';
   try {
     const summary=summarizeSample(state.stageRows);
     state.summaries.push(summary);state.calibration.push(state.stageRows);
+    $('sampleStatus').textContent=`${prompts[state.stage][0]} sample accepted: ${summary.voiced_seconds.toFixed(2)} s reliable voice, ${(summary.voiced_fraction*100).toFixed(0)}% coverage.`;
     $('samples').children[state.stage].textContent=`${['Low','Middle','High'][state.stage]}: ${summary.median_hz.toFixed(2)} Hz · stability ${summary.stability_cents.toFixed(1)} cents · ${(summary.voiced_fraction*100).toFixed(0)}% reliable voice`;
     state.stage++;
     if (state.stage===3) {
@@ -108,7 +112,12 @@ function finishSample() {
       $('explanation').textContent=state.recommendation.explanation;
       message('Listen to the proposed Sa, then confirm or retry calibration.');
     } else message('Sample accepted. Continue with the next comfortable pitch.');
-  } catch(e) {message(describeError(e)+(state.stage===3?' Tap Retry calibration for a new set of samples.':''),true);}
+  } catch(e) {
+    const error=describeError(e)+(state.stage===3?' Tap Retry calibration for a new set of samples.':' Tap Record again to retry this same step.');
+    if (state.stage<3) $('recordProgress').value=0;
+    $('sampleStatus').textContent=`Sample not accepted. ${error}`;
+    message(error,true);
+  }
   stageUI();
 }
 function selection() {
