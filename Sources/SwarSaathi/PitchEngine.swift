@@ -1,6 +1,5 @@
 import Foundation
 import AVFoundation
-import Accelerate
 import QuartzCore
 
 enum PitchEngineError: LocalizedError {
@@ -25,19 +24,23 @@ enum EngineStatus {
     case failed(String)
 }
 
-/// Owns AVAudioEngine, runs YIN on a background queue, and delivers `PitchFrame`s on the main queue.
+/// Preserves AVAudioEngine/session ownership; one bounded worker per recording.
+/// Lifecycle and callbacks are confined to the main thread.
 final class PitchEngine {
     var onFrame: ((PitchFrame) -> Void)?       // main thread
     var onStatus: ((EngineStatus) -> Void)?    // main thread
 
     private let engine = AVAudioEngine()
-    private let queue = DispatchQueue(label: "swarsaathi.audio.processing", qos: .userInitiated)
     private var config = PitchConfig()
+    private var activeRun: AudioProcessingRun?
+    private var lastRun: AudioProcessingRun?
+    private var generation: UInt64 = 0
+    private var deliveryTimer: Timer?
+    private var tapInstalled = false
 
-    // Confined to `queue`
-    private var detector: YINPitchDetector?
-    private var smoother = PitchSmoother()
-    private var pending: [Float] = []
+    var diagnostics: PitchEngineDiagnostics {
+        (activeRun ?? lastRun ?? AudioProcessingRun(generation: 0, sampleRate: 44100)).diagnostics
+    }
 
     private var wantsRunning = false
     private var observers: [NSObjectProtocol] = []
@@ -60,6 +63,10 @@ final class PitchEngine {
 
     deinit {
         observers.forEach { NotificationCenter.default.removeObserver($0) }
+        deliveryTimer?.invalidate()
+        if tapInstalled { engine.inputNode.removeTap(onBus: 0) }
+        engine.stop()
+        activeRun?.stop()
     }
 
     // MARK: Permission
@@ -91,16 +98,20 @@ final class PitchEngine {
     // MARK: Start / stop
 
     func start() throws {
+        precondition(Thread.isMainThread)
         wantsRunning = true
         do {
             try startEngine()
         } catch {
             wantsRunning = false
+            stopEngineOnly()
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             throw error
         }
     }
 
     func stop() {
+        precondition(Thread.isMainThread)
         wantsRunning = false
         stopEngineOnly()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -121,33 +132,63 @@ final class PitchEngine {
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { throw PitchEngineError.badFormat }
 
-        let det = YINPitchDetector(sampleRate: format.sampleRate, config: config)
-        queue.sync {
-            self.detector = det
-            self.pending.removeAll(keepingCapacity: true)
-            self.smoother.reset()
-        }
-
-        input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            guard let self = self, let channels = buffer.floatChannelData else { return }
+        generation &+= 1
+        let run = AudioProcessingRun(generation: generation, sampleRate: format.sampleRate, config: config)
+        if let error = run.configurationError { throw PitchEngineError.engine(error) }
+        activeRun = run
+        lastRun = run
+        run.start()
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, when in
+            guard let channels = buffer.floatChannelData else { return }
             let n = Int(buffer.frameLength)
-            let samples = Array(UnsafeBufferPointer(start: channels[0], count: n))
-            self.queue.async { self.process(samples) }
+            // AVAudioTime host timestamps and CACurrentMediaTime use the same
+            // monotonic host clock. Timestamp the captured window, not DSP end.
+            let fallback = !when.isHostTimeValid
+            let time = fallback ? CACurrentMediaTime() - Double(n) / format.sampleRate
+                                : AVAudioTime.seconds(forHostTime: when.hostTime)
+            run.enqueue(channels[0], count: n, time: time, usedTimestampFallback: fallback)
         }
-
+        tapInstalled = true
         engine.prepare()
         do {
             try engine.start()
         } catch {
-            input.removeTap(onBus: 0)
+            stopEngineOnly()
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
             throw PitchEngineError.engine(error.localizedDescription)
         }
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self, weak run] _ in
+            guard let self = self, let run = run, self.activeRun === run else { return }
+            for frame in run.delivery.drain() {
+                guard self.activeRun === run else { break }
+                self.onFrame?(frame)
+            }
+        }
+        deliveryTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        NSLog("Capture start generation %llu, %.0f Hz, window %d, hop %d, route %@",
+              generation, format.sampleRate, config.frameSize, config.hopSize,
+              session.currentRoute.inputs.map { $0.portName }.joined(separator: ", "))
     }
 
     private func stopEngineOnly() {
-        engine.inputNode.removeTap(onBus: 0)
+        deliveryTimer?.invalidate()
+        deliveryTimer = nil
+        let run = activeRun
+        activeRun = nil // Invalidates all deliveries before stopping capture.
+        if tapInstalled {
+            engine.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
+        }
         engine.stop()
+        if let run = run {
+            let joined = run.stop()
+            let stats = run.diagnostics
+            NSLog("Capture stop generation %llu: frames %d, drops %d samples, discontinuities %d, delivery drops %d, DSP median %.3f / p95 %.3f ms, joined %@",
+                  stats.generation, stats.processedFrames, stats.droppedSamples, stats.discontinuities,
+                  stats.deliveryDroppedFrames, stats.processingMedianMs, stats.processingP95Ms,
+                  joined ? "yes" : "NO")
+        }
     }
 
     // MARK: Interruptions
@@ -172,7 +213,8 @@ final class PitchEngine {
         // Route change (headphones, Bluetooth) or media services reset.
         guard wantsRunning else { return }
         stopEngineOnly()
-        restart()
+        onStatus?(.interrupted)
+        if wantsRunning { restart() }
     }
 
     private func restart() {
@@ -180,43 +222,9 @@ final class PitchEngine {
             try startEngine()
             onStatus?(.resumed)
         } catch {
+            wantsRunning = false
             onStatus?(.failed(error.localizedDescription))
         }
     }
 
-    // MARK: Processing (background queue)
-
-    private func process(_ samples: [Float]) {
-        guard let detector = detector else { return }
-        pending.append(contentsOf: samples)
-
-        while pending.count >= config.frameSize {
-            let frame = Array(pending.prefix(config.frameSize))
-            pending.removeFirst(config.hopSize)
-            let count = vDSP_Length(frame.count)
-
-            var rms: Float = 0
-            vDSP_rmsqv(frame, 1, &rms, count)
-
-            var raw: Double?
-            var confidence = 0.0
-            if rms >= config.silenceRMS {
-                var mean: Float = 0
-                vDSP_meanv(frame, 1, &mean, count)
-                var negMean = -mean
-                var centered = [Float](repeating: 0, count: frame.count)
-                vDSP_vsadd(frame, 1, &negMean, &centered, 1, count)
-                let result = centered.withUnsafeBufferPointer { detector.detect($0.baseAddress!) }
-                if let r = result, r.frequency >= config.minFrequency, r.frequency <= config.maxFrequency {
-                    raw = r.frequency
-                    confidence = r.confidence
-                }
-            }
-
-            let smoothed = smoother.process(raw)
-            let out = PitchFrame(time: CACurrentMediaTime(), frequency: smoothed,
-                                 confidence: confidence, level: Double(rms))
-            DispatchQueue.main.async { [weak self] in self?.onFrame?(out) }
-        }
-    }
 }

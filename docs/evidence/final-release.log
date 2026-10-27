@@ -1,0 +1,159 @@
+[0/1] Planning build
+Building for production...
+[0/3] Write sources
+[1/3] Write swift-version--245431BCDE2E4068.txt
+[3/4] Compiling SwarSaathiCore AudioPipeline.swift
+[4/8] Compiling SwarSaathiCoreTests AudioPipelineTests.swift
+[4/8] /workspace/swarsaathi-prototype/.build/x86_64-unknown-linux-gnu/release/SwarSaathiPrototypePackageDiscoveredTests.derived/all-discovered-tests.swift
+[5/9] Write sources
+[7/10] Compiling SwarSaathiPrototypePackageDiscoveredTests SwarSaathiCoreTests.swift
+[7/9] Write Objects.LinkFileList
+[8/9] Linking SwarSaathiPrototypePackageTests.xctest
+Build complete! (12.64s)
+Test Suite 'All tests' started at 2026-10-27 08:48:24.482
+Test Suite 'release.xctest' started at 2026-10-27 08:48:24.483
+Test Suite 'AudioPipelineTests' started at 2026-10-27 08:48:24.483
+Test Case 'AudioPipelineTests.testCapacityAndFIFOWithWraparound' started at 2026-10-27 08:48:24.483
+Test Case 'AudioPipelineTests.testCapacityAndFIFOWithWraparound' passed (0.001 seconds)
+Test Case 'AudioPipelineTests.testConcurrentProducerConsumerKeepsPacketsIntactAndAccountsForLoss' started at 2026-10-27 08:48:24.484
+Test Case 'AudioPipelineTests.testConcurrentProducerConsumerKeepsPacketsIntactAndAccountsForLoss' passed (0.001 seconds)
+Test Case 'AudioPipelineTests.testCopiesSamplesAndMetadataWithoutRetainingProducerStorage' started at 2026-10-27 08:48:24.485
+Test Case 'AudioPipelineTests.testCopiesSamplesAndMetadataWithoutRetainingProducerStorage' passed (0.0 seconds)
+Test Case 'AudioPipelineTests.testFrameDeliveryBufferBoundsBatchesAndReset' started at 2026-10-27 08:48:24.485
+Test Case 'AudioPipelineTests.testFrameDeliveryBufferBoundsBatchesAndReset' passed (0.0 seconds)
+Test Case 'AudioPipelineTests.testLeasedSlotIsNotOverwrittenAndBodyRunsOutsideLock' started at 2026-10-27 08:48:24.485
+Test Case 'AudioPipelineTests.testLeasedSlotIsNotOverwrittenAndBodyRunsOutsideLock' passed (0.0 seconds)
+Test Case 'AudioPipelineTests.testRejectsOversizeInvalidAndStalePacketsWithExactCounters' started at 2026-10-27 08:48:24.485
+Test Case 'AudioPipelineTests.testRejectsOversizeInvalidAndStalePacketsWithExactCounters' passed (0.0 seconds)
+Test Case 'AudioPipelineTests.testResetInvalidatesPendingGenerationButProtectsBorrowedMemory' started at 2026-10-27 08:48:24.485
+Test Case 'AudioPipelineTests.testResetInvalidatesPendingGenerationButProtectsBorrowedMemory' passed (0.0 seconds)
+Test Suite 'AudioPipelineTests' passed at 2026-10-27 08:48:24.486
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'AudioProcessingRunTests' started at 2026-10-27 08:48:24.486
+Test Case 'AudioProcessingRunTests.testActualWorkerPipelineUsesAudioCenterTimeAndRawPitch' started at 2026-10-27 08:48:24.486
+Test Case 'AudioProcessingRunTests.testActualWorkerPipelineUsesAudioCenterTimeAndRawPitch' passed (0.003 seconds)
+Test Case 'AudioProcessingRunTests.testDroppedPacketBreaksWindowRatherThanSplicingAudio' started at 2026-10-27 08:48:24.488
+Test Case 'AudioProcessingRunTests.testDroppedPacketBreaksWindowRatherThanSplicingAudio' passed (0.001 seconds)
+Test Case 'AudioProcessingRunTests.testRealWorkerStopAndNewGenerationCannotShareOldFrames' started at 2026-10-27 08:48:24.489
+Test Case 'AudioProcessingRunTests.testRealWorkerStopAndNewGenerationCannotShareOldFrames' passed (0.004 seconds)
+Test Case 'AudioProcessingRunTests.testSilenceAndOctaveAreNeverCopiedFromAnExpectedTarget' started at 2026-10-27 08:48:24.494
+Test Case 'AudioProcessingRunTests.testSilenceAndOctaveAreNeverCopiedFromAnExpectedTarget' passed (0.007 seconds)
+Test Suite 'AudioProcessingRunTests' passed at 2026-10-27 08:48:24.501
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.015 (0.015) seconds
+Test Suite 'CalibrationTests' started at 2026-10-27 08:48:24.501
+Test Case 'CalibrationTests.testAbsentEndsAreIncludedByExplicitRecordingClock' started at 2026-10-27 08:48:24.501
+Test Case 'CalibrationTests.testAbsentEndsAreIncludedByExplicitRecordingClock' passed (0.101 seconds)
+Test Case 'CalibrationTests.testAdjustmentsAndNewSamplesInvalidateConfirmation' started at 2026-10-27 08:48:24.602
+Test Case 'CalibrationTests.testAdjustmentsAndNewSamplesInvalidateConfirmation' passed (0.0 seconds)
+Test Case 'CalibrationTests.testBeginningAndEndAreTrimmedWithoutPrefilteringAllOtherErrors' started at 2026-10-27 08:48:24.602
+Test Case 'CalibrationTests.testBeginningAndEndAreTrimmedWithoutPrefilteringAllOtherErrors' passed (0.0 seconds)
+Test Case 'CalibrationTests.testCloseAndRepeatedLowMiddleMeasurementsAreAllowed' started at 2026-10-27 08:48:24.602
+Test Case 'CalibrationTests.testCloseAndRepeatedLowMiddleMeasurementsAreAllowed' passed (0.0 seconds)
+Test Case 'CalibrationTests.testConfirmationRequiresSuccessfulMatchingReference' started at 2026-10-27 08:48:24.602
+Test Case 'CalibrationTests.testConfirmationRequiresSuccessfulMatchingReference' passed (0.0 seconds)
+Test Case 'CalibrationTests.testContradictoryCoverageStatisticsAreRejected' started at 2026-10-27 08:48:24.603
+Test Case 'CalibrationTests.testContradictoryCoverageStatisticsAreRejected' passed (0.0 seconds)
+Test Case 'CalibrationTests.testContradictoryLowMiddleHighLabelsAreRejected' started at 2026-10-27 08:48:24.603
+Test Case 'CalibrationTests.testContradictoryLowMiddleHighLabelsAreRejected' passed (0.0 seconds)
+Test Case 'CalibrationTests.testDifferentRangesTransposeAndResultsAreRepeatable' started at 2026-10-27 08:48:24.603
+Test Case 'CalibrationTests.testDifferentRangesTransposeAndResultsAreRepeatable' passed (0.0 seconds)
+Test Case 'CalibrationTests.testLowConfidenceInvalidFrequencyAndSparseEvidenceStayMissing' started at 2026-10-27 08:48:24.603
+Test Case 'CalibrationTests.testLowConfidenceInvalidFrequencyAndSparseEvidenceStayMissing' passed (0.0 seconds)
+Test Case 'CalibrationTests.testMissingVoiceCannotBeFilteredOutOfCoverage' started at 2026-10-27 08:48:24.604
+Test Case 'CalibrationTests.testMissingVoiceCannotBeFilteredOutOfCoverage' passed (0.0 seconds)
+Test Case 'CalibrationTests.testOverlappingMeasuredUncertaintyDoesNotForcePitchSeparation' started at 2026-10-27 08:48:24.604
+Test Case 'CalibrationTests.testOverlappingMeasuredUncertaintyDoesNotForcePitchSeparation' passed (0.0 seconds)
+Test Case 'CalibrationTests.testRecommendationFitsOriginalFiveNoteRatiosAndIsNotMiddle' started at 2026-10-27 08:48:24.604
+Test Case 'CalibrationTests.testRecommendationFitsOriginalFiveNoteRatiosAndIsNotMiddle' passed (0.0 seconds)
+Test Case 'CalibrationTests.testSilenceAndInsufficientFramesAreRejected' started at 2026-10-27 08:48:24.604
+Test Case 'CalibrationTests.testSilenceAndInsufficientFramesAreRejected' passed (0.0 seconds)
+Test Case 'CalibrationTests.testStableSampleUsesRawMedianAndCoverage' started at 2026-10-27 08:48:24.605
+Test Case 'CalibrationTests.testStableSampleUsesRawMedianAndCoverage' passed (0.0 seconds)
+Test Case 'CalibrationTests.testUnstablePitchAndOctaveAlternationAreRejected' started at 2026-10-27 08:48:24.605
+Test Case 'CalibrationTests.testUnstablePitchAndOctaveAlternationAreRejected' passed (0.0 seconds)
+Test Case 'CalibrationTests.testUnsupportedRangeAndInvalidSampleStatisticsAreRejected' started at 2026-10-27 08:48:24.605
+Test Case 'CalibrationTests.testUnsupportedRangeAndInvalidSampleStatisticsAreRejected' passed (0.0 seconds)
+Test Suite 'CalibrationTests' passed at 2026-10-27 08:48:24.605
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.104 (0.104) seconds
+Test Suite 'ExercisePipelineTests' started at 2026-10-27 08:48:24.605
+Test Case 'ExercisePipelineTests.testReferenceWaveformThroughActualYINAndFullExerciseScoring' started at 2026-10-27 08:48:24.605
+SYNTHETIC_EXERCISE_PIPELINE bpm=72 notes=5 accuracy_percent=100.0 coverage_percent=100.0 raw_observations=178 real_singing=false
+Test Case 'ExercisePipelineTests.testReferenceWaveformThroughActualYINAndFullExerciseScoring' passed (0.152 seconds)
+Test Case 'ExercisePipelineTests.testSilenceAndWrongOctaveThroughActualYINLowerFullScore' started at 2026-10-27 08:48:24.757
+Test Case 'ExercisePipelineTests.testSilenceAndWrongOctaveThroughActualYINLowerFullScore' passed (0.156 seconds)
+Test Suite 'ExercisePipelineTests' passed at 2026-10-27 08:48:24.913
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.308 (0.308) seconds
+Test Suite 'PitchDetectorTests' started at 2026-10-27 08:48:24.913
+Test Case 'PitchDetectorTests.testCleanSyntheticFrequencyAccuracy' started at 2026-10-27 08:48:24.913
+DSP_CLEAN_METRICS cases=44 max_absolute_cents=0.43862413069685574 median_absolute_cents=0.02211654688589393 synthetic_only=true
+Test Case 'PitchDetectorTests.testCleanSyntheticFrequencyAccuracy' passed (0.169 seconds)
+Test Case 'PitchDetectorTests.testDefaultLowerSearchBoundaryIsDetected' started at 2026-10-27 08:48:25.082
+Test Case 'PitchDetectorTests.testDefaultLowerSearchBoundaryIsDetected' passed (0.001 seconds)
+Test Case 'PitchDetectorTests.testDetectorOnlySyntheticComputeTiming' started at 2026-10-27 08:48:25.084
+DSP_BENCHMARK implementation=Linux_scalar_equivalent calls=500 window_samples=2048 sample_rate=44100.0 median_ms=0.768438 p95_ms=0.981038 sample_window_ms=46.439909297052154 minimum_center_buffer_ms=23.219954648526077 synthetic_only=true end_to_end_latency_measured=false
+Test Case 'PitchDetectorTests.testDetectorOnlySyntheticComputeTiming' passed (0.418 seconds)
+Test Case 'PitchDetectorTests.testDifferenceMatchesSimpleConstantWindowReference' started at 2026-10-27 08:48:25.502
+DSP_DIFFERENCE_METRICS max_absolute_float_difference=0.0018300735587217787
+Test Case 'PitchDetectorTests.testDifferenceMatchesSimpleConstantWindowReference' passed (0.102 seconds)
+Test Case 'PitchDetectorTests.testHarmonicRichTones' started at 2026-10-27 08:48:25.604
+Test Case 'PitchDetectorTests.testHarmonicRichTones' passed (0.005 seconds)
+Test Case 'PitchDetectorTests.testInvalidAndUndersizedBuffersAreRejectedWithoutUnsafeReads' started at 2026-10-27 08:48:25.609
+Test Case 'PitchDetectorTests.testInvalidAndUndersizedBuffersAreRejectedWithoutUnsafeReads' passed (0.0 seconds)
+Test Case 'PitchDetectorTests.testInvalidConfigurationIsInertInsteadOfReadingBeyondFrame' started at 2026-10-27 08:48:25.609
+Test Case 'PitchDetectorTests.testInvalidConfigurationIsInertInsteadOfReadingBeyondFrame' passed (0.0 seconds)
+Test Case 'PitchDetectorTests.testModerateNoiseRetainsKnownFundamental' started at 2026-10-27 08:48:25.609
+Test Case 'PitchDetectorTests.testModerateNoiseRetainsKnownFundamental' passed (0.003 seconds)
+Test Case 'PitchDetectorTests.testRawOctaveTransitionRemainsAnOctave' started at 2026-10-27 08:48:25.613
+Test Case 'PitchDetectorTests.testRawOctaveTransitionRemainsAnOctave' passed (0.002 seconds)
+Test Case 'PitchDetectorTests.testRawPitchRemainsIndependentFromDisplaySmoothing' started at 2026-10-27 08:48:25.615
+Test Case 'PitchDetectorTests.testRawPitchRemainsIndependentFromDisplaySmoothing' passed (0.005 seconds)
+Test Case 'PitchDetectorTests.testSharedPreprocessingRemovesDCAndAppliesActualSilenceGate' started at 2026-10-27 08:48:25.620
+Test Case 'PitchDetectorTests.testSharedPreprocessingRemovesDCAndAppliesActualSilenceGate' passed (0.001 seconds)
+Test Case 'PitchDetectorTests.testSilenceDoesNotBecomePitch' started at 2026-10-27 08:48:25.621
+Test Case 'PitchDetectorTests.testSilenceDoesNotBecomePitch' passed (0.001 seconds)
+Test Case 'PitchDetectorTests.testSmootherDoesNotBridgeUnvoicedFrame' started at 2026-10-27 08:48:25.622
+Test Case 'PitchDetectorTests.testSmootherDoesNotBridgeUnvoicedFrame' passed (0.0 seconds)
+Test Suite 'PitchDetectorTests' passed at 2026-10-27 08:48:25.622
+	 Executed 13 tests, with 0 failures (0 unexpected) in 0.708 (0.708) seconds
+Test Suite 'PracticeTimelineTests' started at 2026-10-27 08:48:25.622
+Test Case 'PracticeTimelineTests.testConflictingDuplicatesNeverPreferSuccessfulObservation' started at 2026-10-27 08:48:25.622
+Test Case 'PracticeTimelineTests.testConflictingDuplicatesNeverPreferSuccessfulObservation' passed (0.0 seconds)
+Test Case 'PracticeTimelineTests.testDuplicateSparseInvalidAndLowQualityFramesDoNotFillSilence' started at 2026-10-27 08:48:25.622
+Test Case 'PracticeTimelineTests.testDuplicateSparseInvalidAndLowQualityFramesDoNotFillSilence' passed (0.0 seconds)
+Test Case 'PracticeTimelineTests.testFiveNoteDefinitionAndFixedTimelineAreIndependentOfObservations' started at 2026-10-27 08:48:25.622
+Test Case 'PracticeTimelineTests.testFiveNoteDefinitionAndFixedTimelineAreIndependentOfObservations' passed (0.0 seconds)
+Test Case 'PracticeTimelineTests.testJSONReportEncodesRawObservationAndEveryExpectedNote' started at 2026-10-27 08:48:25.622
+Test Case 'PracticeTimelineTests.testJSONReportEncodesRawObservationAndEveryExpectedNote' passed (0.001 seconds)
+Test Case 'PracticeTimelineTests.testNativeHopCoverageAcrossSampleRatesAndTempos' started at 2026-10-27 08:48:25.623
+Test Case 'PracticeTimelineTests.testNativeHopCoverageAcrossSampleRatesAndTempos' passed (0.001 seconds)
+Test Case 'PracticeTimelineTests.testNoObservedVoiceDoesNotInventAZeroCentError' started at 2026-10-27 08:48:25.624
+Test Case 'PracticeTimelineTests.testNoObservedVoiceDoesNotInventAZeroCentError' passed (0.0 seconds)
+Test Case 'PracticeTimelineTests.testOriginalSuccessFilteredSummaryInflationRegression' started at 2026-10-27 08:48:25.624
+REGRESSION original filtered formula=100%; full five-note denominator=20% for one correct note + four missing
+Test Case 'PracticeTimelineTests.testOriginalSuccessFilteredSummaryInflationRegression' passed (0.0 seconds)
+Test Case 'PracticeTimelineTests.testPerfectIndependentTrackScoresFullExercise' started at 2026-10-27 08:48:25.624
+Test Case 'PracticeTimelineTests.testPerfectIndependentTrackScoresFullExercise' passed (0.0 seconds)
+Test Case 'PracticeTimelineTests.testReferenceSynthUsesTimelineFrequenciesDurationsAndCleanFades' started at 2026-10-27 08:48:25.625
+Test Case 'PracticeTimelineTests.testReferenceSynthUsesTimelineFrequenciesDurationsAndCleanFades' passed (0.023 seconds)
+Test Case 'PracticeTimelineTests.testShiftedSaChangesBothTargetsAndReferenceWithoutModifyingObservations' started at 2026-10-27 08:48:25.648
+Test Case 'PracticeTimelineTests.testShiftedSaChangesBothTargetsAndReferenceWithoutModifyingObservations' passed (0.001 seconds)
+Test Case 'PracticeTimelineTests.testSilentMissingAndEarlyStopRemainInDenominator' started at 2026-10-27 08:48:25.648
+Test Case 'PracticeTimelineTests.testSilentMissingAndEarlyStopRemainInDenominator' passed (0.001 seconds)
+Test Case 'PracticeTimelineTests.testSilentNoteEdgesRemainInFullExerciseDenominator' started at 2026-10-27 08:48:25.649
+Test Case 'PracticeTimelineTests.testSilentNoteEdgesRemainInFullExerciseDenominator' passed (0.0 seconds)
+Test Case 'PracticeTimelineTests.testSparseNonuniformEvidenceCannotFillMissingDurations' started at 2026-10-27 08:48:25.649
+Test Case 'PracticeTimelineTests.testSparseNonuniformEvidenceCannotFillMissingDurations' passed (0.0 seconds)
+Test Case 'PracticeTimelineTests.testTimingDriftLosesScoreWithoutDroppingNoteEdges' started at 2026-10-27 08:48:25.649
+Test Case 'PracticeTimelineTests.testTimingDriftLosesScoreWithoutDroppingNoteEdges' passed (0.0 seconds)
+Test Case 'PracticeTimelineTests.testWrongSharpFlatAndOctaveObservationsLoseScoreWithoutThresholdChanges' started at 2026-10-27 08:48:25.649
+Test Case 'PracticeTimelineTests.testWrongSharpFlatAndOctaveObservationsLoseScoreWithoutThresholdChanges' passed (0.0 seconds)
+Test Suite 'PracticeTimelineTests' passed at 2026-10-27 08:48:25.650
+	 Executed 15 tests, with 0 failures (0 unexpected) in 0.028 (0.028) seconds
+Test Suite 'release.xctest' passed at 2026-10-27 08:48:25.650
+	 Executed 57 tests, with 0 failures (0 unexpected) in 1.165 (1.165) seconds
+Test Suite 'All tests' passed at 2026-10-27 08:48:25.650
+	 Executed 57 tests, with 0 failures (0 unexpected) in 1.165 (1.165) seconds
+◇ Test run started.
+↳ Testing Library Version: 6.2.1 (c9d57c83568b06d)
+↳ Target Platform: x86_64-unknown-linux-gnu
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

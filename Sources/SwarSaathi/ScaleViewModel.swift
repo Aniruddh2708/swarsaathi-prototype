@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import QuartzCore
 
 final class ScaleViewModel: ObservableObject {
     enum Test: Int, CaseIterable, Identifiable {
@@ -35,11 +36,21 @@ final class ScaleViewModel: ObservableObject {
     @Published private(set) var level: Double = 0
     @Published var errorMessage: String?
     @Published var permissionDenied = false
-    @Published var sa: Double = 0
+    @Published private(set) var sa: Double = 0
+    @Published private(set) var isOpening = false
+    @Published private(set) var isReferencePlaying = false
+    @Published private var calibration = CalibrationSession()
 
-    private var samples: [Double] = []
+    private var samples: [CalibrationObservation] = []
+    private var summaries: [Test: CalibrationSample] = [:]
+    private var measuredFrames: [Test: [CalibrationObservation]] = [:]
     private var missCount = 0
     private let engine: PitchEngine
+    private let reference = ReferencePlayer()
+    private var permissionGeneration = 0
+    private var screenActive = true
+    private var recordingStart = 0.0
+    private var recordingTimer: Timer?
 
     init(engine: PitchEngine) {
         self.engine = engine
@@ -49,15 +60,21 @@ final class ScaleViewModel: ObservableObject {
     var low: Double? { results[.low] }
     var comfortable: Double? { results[.comfortable] }
     var high: Double? { results[.high] }
+    var recommendation: SaRecommendation? { calibration.recommendation }
+    var canConfirm: Bool { calibration.canConfirm && !isReferencePlaying && !isOpening && activeTest == nil }
+    var canPractice: Bool { calibration.confirmedSa == sa && sa > 0 && !isReferencePlaying && !isOpening && activeTest == nil }
+    var isConfirmed: Bool { calibration.confirmedSa == sa && sa > 0 }
+    var recordingControlsEnabled: Bool { !isOpening && !isReferencePlaying }
 
     var rangeSemitones: Double? {
-        guard let l = low, let h = high else { return nil }
+        let values = results.values
+        guard let l = values.min(), let h = values.max(), l > 0 else { return nil }
         return 12 * log2(h / l)
     }
 
     var orderLooksWrong: Bool {
         guard let l = low, let c = comfortable, let h = high else { return false }
-        return !(l < c && c < h)
+        return !(l <= c && c <= h)
     }
 
     func isUnlocked(_ test: Test) -> Bool {
@@ -72,9 +89,16 @@ final class ScaleViewModel: ObservableObject {
     }
 
     private func startTest(_ test: Test) {
+        guard screenActive, activeTest == nil, !isOpening, !isReferencePlaying else { return }
         errorMessage = nil
+        permissionGeneration += 1
+        let generation = permissionGeneration
+        calibration.invalidate()
+        sa = 0
+        isOpening = true
         engine.requestPermission { [weak self] granted in
-            guard let self = self else { return }
+            guard let self = self, self.screenActive, self.permissionGeneration == generation else { return }
+            self.isOpening = false
             guard granted else {
                 self.permissionDenied = true
                 self.errorMessage = "Microphone access is turned off. Please allow it in Settings so Swar Saathi can hear you sing."
@@ -82,13 +106,28 @@ final class ScaleViewModel: ObservableObject {
             }
             self.permissionDenied = false
             self.samples.removeAll()
+            self.results.removeValue(forKey: test)
+            self.summaries.removeValue(forKey: test)
+            self.measuredFrames.removeValue(forKey: test)
             self.missCount = 0
             self.liveFrequency = nil
-            self.engine.onFrame = { [weak self] frame in self?.handle(frame) }
-            self.engine.onStatus = { [weak self] status in self?.handle(status) }
+            self.engine.onFrame = { [weak self] frame in
+                guard self?.permissionGeneration == generation else { return }
+                self?.handle(frame)
+            }
+            self.engine.onStatus = { [weak self] status in
+                guard self?.permissionGeneration == generation else { return }
+                self?.handle(status)
+            }
             do {
                 try self.engine.start()
+                self.recordingStart = CACurrentMediaTime()
                 self.activeTest = test
+                self.recordingTimer?.invalidate()
+                self.recordingTimer = Timer.scheduledTimer(withTimeInterval: 3.2, repeats: false) { [weak self] _ in
+                    guard self?.permissionGeneration == generation else { return }
+                    self?.stopAndSave()
+                }
             } catch {
                 self.errorMessage = error.localizedDescription
             }
@@ -98,10 +137,11 @@ final class ScaleViewModel: ObservableObject {
     private func handle(_ frame: PitchFrame) {
         guard activeTest != nil else { return }
         level = min(1, (frame.level / 0.15).squareRoot())
-        if let hz = frame.frequency {
+        samples.append(CalibrationObservation(time: frame.time, frequency: frame.rawFrequency,
+                                              confidence: frame.confidence))
+        if let hz = frame.rawFrequency, hz.isFinite, hz > 0, frame.confidence >= CalibrationAnalyzer.minimumConfidence {
             missCount = 0
             liveFrequency = hz
-            samples.append(hz)
         } else {
             missCount += 1
             if missCount > 4 { liveFrequency = nil }
@@ -110,53 +150,132 @@ final class ScaleViewModel: ObservableObject {
 
     private func handle(_ status: EngineStatus) {
         switch status {
-        case .interrupted: errorMessage = "Audio was interrupted. We'll resume listening automatically."
-        case .resumed: errorMessage = nil
-        case .failed(let m): errorMessage = m
+        case .interrupted:
+            stopIfNeeded(markInactive: false)
+            errorMessage = "Audio was interrupted. This sample was not accepted; retry when ready."
+        case .resumed:
+            stopIfNeeded(markInactive: false)
+            errorMessage = "The microphone route changed. Retry this sample with the selected input."
+        case .failed(let m):
+            stopIfNeeded(markInactive: false)
+            errorMessage = m
         }
     }
 
     private func stopAndSave() {
         guard let test = activeTest else { return }
+        let recordingEnd = CACurrentMediaTime()
+        recordingTimer?.invalidate()
+        recordingTimer = nil
         engine.stop()
         activeTest = nil
         liveFrequency = nil
         level = 0
 
-        // Drop onset transients, then keep the stable cluster around the median.
-        let usable = Array(samples.dropFirst(4))
-        guard usable.count >= 8, let med = PitchMath.median(usable) else {
-            errorMessage = "We couldn't hear a clear note. Sing a little louder and hold one note for a couple of seconds."
-            return
+        do {
+            measuredFrames[test] = samples
+            let sample = try CalibrationAnalyzer.summarize(samples, recordingStart: recordingStart,
+                                                           recordingEnd: recordingEnd)
+            summaries[test] = sample
+            measuredFrames[test] = samples
+            results[test] = sample.medianHz
+            errorMessage = nil
+            if let low = summaries[.low], let middle = summaries[.comfortable], let high = summaries[.high] {
+                let proposal = try CalibrationAnalyzer.recommend(samples: [low, middle, high])
+                calibration.propose(proposal)
+                sa = proposal.saHz
+            }
+            NSLog("Calibration sample %@: %.3f Hz, %.0f%% reliable coverage", test.title, sample.medianHz, 100 * sample.coverage)
+        } catch {
+            errorMessage = error.localizedDescription
+            NSLog("Calibration rejected: %@", error.localizedDescription)
         }
-        let stable = usable.filter { abs(PitchMath.cents(detected: $0, expected: med)) < 100 }
-        guard stable.count >= 8,
-              Double(stable.count) >= 0.5 * Double(usable.count),
-              let value = PitchMath.median(stable) else {
-            errorMessage = "Your note moved around too much. Try holding one steady note."
-            return
-        }
-        errorMessage = nil
-        results[test] = value
-        if test == .comfortable { sa = value.rounded() }
+        saveAudit(status: errorMessage ?? "Measured sample accepted")
     }
 
-    func stopIfNeeded() {
-        if activeTest != nil {
-            engine.stop()
-            activeTest = nil
-            liveFrequency = nil
-            level = 0
+    func stopIfNeeded(markInactive: Bool = true) {
+        permissionGeneration += 1
+        if markInactive { screenActive = false }
+        isOpening = false
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+        reference.stop()
+        isReferencePlaying = false
+        engine.stop()
+        activeTest = nil
+        liveFrequency = nil
+        level = 0
+    }
+
+    func activate() { screenActive = true }
+
+    func playReference() {
+        guard let proposal = recommendation, activeTest == nil, !isOpening else { return }
+        reference.stop()
+        engine.stop()
+        let frequency = proposal.saHz
+        let generation = permissionGeneration
+        isReferencePlaying = true
+        do {
+            try reference.playSa(hz: frequency) { [weak self] completed in
+                guard let self = self, self.screenActive, self.permissionGeneration == generation else { return }
+                self.isReferencePlaying = false
+                self.calibration.referenceFinished(hz: frequency, successful: completed)
+                if !completed { self.errorMessage = "Reference playback was interrupted. Listen again before confirming." }
+            }
+        } catch {
+            isReferencePlaying = false
+            errorMessage = error.localizedDescription
         }
+    }
+
+    func confirmSa() {
+        do {
+            try calibration.confirm()
+            errorMessage = nil
+            saveAudit(status: "Sa explicitly confirmed after reference playback")
+        } catch { errorMessage = error.localizedDescription }
     }
 
     // MARK: Sa adjustment
 
     func shiftSa(semitones: Int) {
-        sa = min(max((sa * pow(2, Double(semitones) / 12)).rounded(), 60), 1000)
+        adjustSa(to: sa * pow(2, Double(semitones) / 12))
     }
 
     func nudgeSa(hz: Double) {
-        sa = min(max(sa + hz, 60), 1000)
+        adjustSa(to: sa + hz)
+    }
+
+    private func adjustSa(to value: Double) {
+        guard !isReferencePlaying, activeTest == nil, !isOpening else { return }
+        do {
+            try calibration.adjust(to: value)
+            sa = value
+            errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func saveAudit(status: String) {
+        struct Audit: Codable {
+            let created: Date
+            let status: String
+            let observations: [String: [CalibrationObservation]]
+            let samples: [String: CalibrationSample]
+            let recommendation: SaRecommendation?
+            let confirmedSa: Double?
+        }
+        guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        do {
+            let folder = documents.appendingPathComponent("Diagnostics", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let rows = Dictionary(uniqueKeysWithValues: measuredFrames.map { ($0.key.title, $0.value) })
+            let stats = Dictionary(uniqueKeysWithValues: summaries.map { ($0.key.title, $0.value) })
+            let audit = Audit(created: Date(), status: status, observations: rows, samples: stats,
+                              recommendation: recommendation, confirmedSa: calibration.confirmedSa)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(audit).write(to: folder.appendingPathComponent("calibration-\(UUID().uuidString).json"), options: .atomic)
+        } catch { NSLog("Calibration diagnostic export failed: %@", error.localizedDescription) }
     }
 }

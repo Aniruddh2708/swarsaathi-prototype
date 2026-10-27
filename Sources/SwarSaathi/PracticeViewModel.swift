@@ -3,103 +3,137 @@ import SwiftUI
 import UIKit
 import QuartzCore
 
-struct GraphPoint {
-    let t: Double
-    let hz: Double?
-    let targetHz: Double
-}
-
-struct LadderLine {
-    let name: String
-    let hz: Double
-}
-
-struct NoteResult: Identifiable {
-    let index: Int
-    let swar: String
-    let expectedHz: Double
-    let detectedHz: Double?
-    let signedCents: Double?
-    let autoCompleted: Bool
-    var id: Int { index }
-}
-
-struct PracticeSummary {
-    let total: Int
-    let attempted: Int
-    let onTarget: Int
-    let needsImprovement: Int
-    let avgAbsCents: Double
-    let accuracyPercent: Double
-}
-
-enum FeedbackKind { case neutral, perfect, onTarget, high, low }
-
 final class PracticeViewModel: ObservableObject {
     enum Phase { case idle, running, finished }
 
     let sa: Double
-    let targets: [NoteTarget]
+    let lowerHz: Double?
+    let upperHz: Double?
+    let exercises: [Alankaar]
     var thresholds = AccuracyThresholds()
-    var holdRequired: Double = 0.6          // seconds on target before auto-advance
-    private let lockout: Double = 0.3       // ignore frames right after advancing
-
+    @Published private(set) var targets: [NoteTarget]
+    @Published var selectedExerciseIndex = 0 { didSet { configurationChanged() } }
+    @Published var bpm: Double = 72 { didSet { configurationChanged() } }
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var currentIndex = 0
     @Published private(set) var detectedHz: Double?
     @Published private(set) var cents: Double?
-    @Published private(set) var feedback = "Press Start Practice, then sing Sa."
+    @Published private(set) var feedback = "Listen to the full reference, then start the guided practice."
     @Published private(set) var feedbackKind: FeedbackKind = .neutral
+    // Source-compatible name; now guided note progress, never a success gate.
     @Published private(set) var holdProgress: Double = 0
     @Published private(set) var graphPoints: [GraphPoint] = []
     @Published private(set) var results: [NoteResult?]
     @Published private(set) var level: Double = 0
+    @Published private(set) var sessionStart: Double?
+    @Published private(set) var referenceComplete = false
+    @Published private(set) var referencePlaying = false
+    @Published private(set) var isStarting = false
+    @Published private(set) var auditURL: URL?
     @Published var errorMessage: String?
     @Published var banner: String?
     @Published var permissionDenied = false
 
     private let engine: PitchEngine
-    private var hold = 0.0
-    private var lastFrameTime: Double?
-    private var lastVoicedTime = 0.0
-    private var noteStartTime = 0.0
-    private var silentFrames = 0
-    private var armed = true
-    private var allSamples: [Double] = []
-    private var onTargetSamples: [Double] = []
+    private let reference = ReferencePlayer()
+    private var timer: Timer?
+    private var requestGeneration = 0
+    private var observations: [PracticeObservation] = []
+    private var lastVoicedTime: Double = 0
+    private var lastScoreTime = -Double.infinity
+    private var incompleteReason: String?
 
-    init(sa: Double, engine: PitchEngine) {
+    init(sa: Double, engine: PitchEngine, lowerHz: Double? = nil, upperHz: Double? = nil) {
         self.sa = sa
         self.engine = engine
-        let t = Alankaar.standard.targets(sa: sa, tuning: .justShuddha)
-        self.targets = t
-        self.results = Array(repeating: nil, count: t.count)
+        self.lowerHz = lowerHz
+        self.upperHz = upperHz
+        self.exercises = Alankaar.demoExercises.filter { exercise in
+            exercise.targets(sa: sa, tuning: .justShuddha).allSatisfy { note in
+                (lowerHz == nil || note.frequency >= lowerHz!) && (upperHz == nil || note.frequency <= upperHz!)
+            }
+        }
+        let initial = (self.exercises.first ?? Alankaar.fiveNote).targets(sa: sa, tuning: .justShuddha)
+        self.targets = initial
+        self.results = Array(repeating: nil, count: initial.count)
     }
 
+    deinit { timer?.invalidate() }
+    var timeline: PracticeTimeline { PracticeTimeline(targets: targets, bpm: min(120, max(40, bpm.isFinite ? bpm : 72))) }
     var currentTarget: NoteTarget { targets[min(currentIndex, targets.count - 1)] }
-    var ladder: [LadderLine] { targets.prefix(8).map { LadderLine(name: $0.label, hz: $0.frequency) } }
+    var ladder: [LadderLine] {
+        var seen: Set<String> = []
+        return targets.filter { seen.insert($0.label).inserted }
+            .map { LadderLine(name: $0.label, hz: $0.frequency) }.sorted { $0.hz < $1.hz }
+    }
+    var summary: PracticeSummary { timeline.score(observations: observations, thresholds: thresholds).summary }
+    var canStart: Bool { referenceComplete && !referencePlaying && !isStarting && !exercises.isEmpty && phase != .running }
 
-    var summary: PracticeSummary {
-        let done = results.compactMap { $0 }.filter { $0.detectedHz != nil }
-        let absList = done.compactMap { $0.signedCents }.map { abs($0) }
-        let onTarget = absList.filter { $0 <= thresholds.onTargetCents }.count
-        let avg = absList.isEmpty ? 0 : absList.reduce(0, +) / Double(absList.count)
-        let pct = done.isEmpty ? 0 : Double(onTarget) / Double(done.count) * 100
-        return PracticeSummary(total: targets.count, attempted: done.count, onTarget: onTarget,
-                               needsImprovement: done.count - onTarget,
-                               avgAbsCents: avg, accuracyPercent: pct)
+    private func configurationChanged() {
+        guard phase != .running else { return }
+        reference.stop()
+        referencePlaying = false
+        referenceComplete = false
+        guard exercises.indices.contains(selectedExerciseIndex) else { return }
+        targets = exercises[selectedExerciseIndex].targets(sa: sa, tuning: .justShuddha)
+        results = Array(repeating: nil, count: targets.count)
+        currentIndex = 0
+        phase = .idle
+        feedback = "Listen to the selected reference before practice."
     }
 
-    // MARK: Session control
+    func playReference() {
+        guard phase != .running && !isStarting else { return }
+        guard !exercises.isEmpty, targetsFitRange() else {
+            errorMessage = "No selected exercise fits the measured comfortable range. Return to calibration."
+            return
+        }
+        engine.stop()
+        referenceComplete = false
+        referencePlaying = true
+        errorMessage = nil
+        do {
+            try reference.play(timeline: timeline) { [weak self] completed in
+                guard let self = self else { return }
+                self.referencePlaying = false
+                self.referenceComplete = completed
+                self.feedback = completed ? "Reference complete. Start when ready for the three-beat count-in." : "Reference interrupted. Replay the full reference."
+            }
+        } catch {
+            referencePlaying = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func stopReference() {
+        reference.stop()
+        referencePlaying = false
+        referenceComplete = false
+    }
+
+    private func targetsFitRange() -> Bool {
+        sa.isFinite && sa > 0 && targets.allSatisfy { note in
+            note.frequency.isFinite && note.frequency > 0 &&
+                (lowerHz == nil || note.frequency >= lowerHz!) && (upperHz == nil || note.frequency <= upperHz!)
+        }
+    }
 
     func start() {
+        guard canStart && targetsFitRange() else {
+            errorMessage = "Listen to the complete reference for an available exercise before starting."
+            return
+        }
+        requestGeneration += 1
+        let generation = requestGeneration
         errorMessage = nil
         banner = nil
+        isStarting = true
         engine.requestPermission { [weak self] granted in
-            guard let self = self else { return }
+            guard let self = self, self.requestGeneration == generation, self.isStarting else { return }
+            self.isStarting = false
             guard granted else {
                 self.permissionDenied = true
-                self.errorMessage = "Microphone access is turned off. Please allow it in Settings so Swar Saathi can hear you sing."
+                self.errorMessage = "Microphone access is turned off. Allow it in Settings."
                 return
             }
             self.permissionDenied = false
@@ -108,172 +142,189 @@ final class PracticeViewModel: ObservableObject {
     }
 
     private func begin() {
+        reference.stop()
+        referencePlaying = false
+        referenceComplete = false
         resetSession()
         engine.onFrame = { [weak self] frame in self?.handle(frame) }
         engine.onStatus = { [weak self] status in self?.handle(status) }
         do {
             try engine.start()
+            sessionStart = CACurrentMediaTime() + 3 * 60 / timeline.bpm
+            lastVoicedTime = sessionStart!
             phase = .running
+            let newTimer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in self?.tick() }
+            timer = newTimer
+            RunLoop.main.add(newTimer, forMode: .common)
+            tick()
         } catch {
+            engine.stop()
             errorMessage = error.localizedDescription
             phase = .idle
         }
     }
 
     private func resetSession() {
+        timer?.invalidate(); timer = nil
         currentIndex = 0
         results = Array(repeating: nil, count: targets.count)
-        graphPoints = []
-        detectedHz = nil
-        cents = nil
-        feedback = "Listening..."
+        graphPoints.removeAll(keepingCapacity: true)
+        observations.removeAll(keepingCapacity: true)
+        detectedHz = nil; cents = nil; holdProgress = 0; level = 0
+        sessionStart = nil
+        lastScoreTime = -Double.infinity
+        incompleteReason = nil
+        auditURL = nil
         feedbackKind = .neutral
-        let now = CACurrentMediaTime()
-        lastVoicedTime = now
-        lastFrameTime = nil
-        resetNoteState(time: now)
-        armed = true
+        feedback = "Count-in…"
     }
 
-    private func resetNoteState(time: Double) {
-        hold = 0
-        holdProgress = 0
-        silentFrames = 0
-        allSamples.removeAll()
-        onTargetSamples.removeAll()
-        noteStartTime = time
+    /// Timer advancement uses only monotonic time, never success/hold/detected F0.
+    private func tick() {
+        guard phase == .running, let start = sessionStart else { return }
+        let now = CACurrentMediaTime(), elapsed = now - start
+        let track = timeline
+        if elapsed < 0 {
+            feedback = "Count-in · \(Int(ceil(-elapsed * track.bpm / 60)))"
+            return
+        }
+        if let note = track.note(at: elapsed) {
+            if currentIndex != note.target.index { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+            currentIndex = note.target.index
+            holdProgress = min(1, max(0, (elapsed - note.start) / (note.end - note.start)))
+        }
+        if now - lastVoicedTime > 0.25 {
+            detectedHz = nil; cents = nil
+            feedback = "No reliable voice. The guided target continues."
+            feedbackKind = .neutral
+        }
+        if now - lastScoreTime > 0.2 {
+            let scored = track.score(observations: observations, thresholds: thresholds)
+            results = scored.results.map { result in
+                elapsed >= track.notes[result.index].end ? result : nil
+            }
+            lastScoreTime = now
+        }
+        // A 200 ms tail lets already-captured window centers reach the main
+        // thread. This is not extra scoring grace; timestamps >= duration fail.
+        if elapsed >= track.duration + 0.2 { finish(incomplete: false) }
     }
 
-    /// Stop button: ends the session and shows the summary if anything was sung.
     func finishEarly() {
-        if results.contains(where: { $0 != nil }) { finish() } else { shutdown() }
+        if phase == .running { finish(incomplete: true, reason: "Stopped before the full exercise completed.") }
+        else { shutdown() }
     }
 
-    private func finish() {
-        engine.stop()
-        phase = .finished
-        level = 0
-        detectedHz = nil
-        cents = nil
-        feedback = "Well done! Here is your summary."
-        feedbackKind = .neutral
-    }
-
-    /// Called when leaving the screen.
-    func shutdown() {
-        engine.stop()
-        if phase == .running { phase = .idle }
-        level = 0
-    }
-
-    /// Manual fallback: move to the next note.
-    func skipNote() {
+    private func finish(incomplete: Bool, reason: String? = nil) {
         guard phase == .running else { return }
-        advance(auto: false, time: CACurrentMediaTime())
+        // Existing observations are retained; unobserved future cells stay zero.
+        requestGeneration += 1
+        engine.stop()
+        timer?.invalidate(); timer = nil
+        reference.stop()
+        let scored = timeline.score(observations: observations, thresholds: thresholds)
+        results = scored.results.map { Optional($0) }
+        phase = .finished
+        level = 0; detectedHz = nil; cents = nil
+        holdProgress = 1
+        incompleteReason = incomplete ? (reason ?? "Attempt incomplete; remaining notes count as missing.") : nil
+        banner = incompleteReason
+        feedback = incomplete ? "Attempt incomplete. Missing expected voice decreases the score." : "Session complete. Review every expected note."
+        feedbackKind = .neutral
+        writeAudit(incomplete: incomplete)
     }
 
-    // MARK: Engine callbacks
+    func prepareAgain() {
+        shutdown()
+        phase = .idle
+        referenceComplete = false
+        feedback = "Listen to the reference again before the next attempt."
+    }
+
+    func shutdown() {
+        requestGeneration += 1
+        isStarting = false
+        timer?.invalidate(); timer = nil
+        reference.stop()
+        referencePlaying = false
+        referenceComplete = false
+        engine.stop()
+        if phase == .running { finish(incomplete: true, reason: "Practice screen closed during the attempt.") }
+        level = 0
+    }
+
+    /// Retained API for callers, but guided targets cannot be manually advanced.
+    func skipNote() { banner = "Targets follow the fixed BPM. Remain silent for a missed note or stop the attempt." }
 
     private func handle(_ status: EngineStatus) {
+        guard phase == .running else { return }
         switch status {
-        case .interrupted: banner = "Audio was interrupted (call or another app). Practice resumes automatically."
-        case .resumed: banner = nil
-        case .failed(let m): errorMessage = m
+        case .interrupted: finish(incomplete: true, reason: "Audio interrupted. Restart rather than resume an uncertain timeline.")
+        case .resumed: finish(incomplete: true, reason: "Audio route restarted. Replay the reference and begin a fresh attempt.")
+        case .failed(let message): finish(incomplete: true, reason: message)
         }
     }
 
     private func handle(_ frame: PitchFrame) {
-        guard phase == .running, currentIndex < targets.count else { return }
-        level = min(1, (frame.level / 0.15).squareRoot())
-        let target = targets[currentIndex]
-
-        var dt = 0.023
-        if let last = lastFrameTime { dt = min(max(frame.time - last, 0), 0.2) }
-        lastFrameTime = frame.time
-
-        graphPoints.append(GraphPoint(t: frame.time, hz: frame.frequency, targetHz: target.frequency))
-        if let first = graphPoints.first, frame.time - first.t > 16 {
-            graphPoints.removeAll { frame.time - $0.t > 16 }
-        }
-
-        if let f = frame.frequency {
-            silentFrames = 0
-            lastVoicedTime = frame.time
-            detectedHz = f
-            let c = PitchMath.cents(detected: f, expected: target.frequency)
-            cents = c
-            allSamples.append(f)
-
-            switch thresholds.classify(c) {
-            case .veryAccurate, .onTarget:
-                if armed && frame.time - noteStartTime >= lockout {
-                    hold += dt
-                    onTargetSamples.append(f)
-                }
-                if thresholds.classify(c) == .veryAccurate {
-                    feedback = hold >= holdRequired * 0.5 ? "Perfect! You are on pitch." : "Perfect! Hold the note."
-                    feedbackKind = .perfect
-                } else {
-                    feedback = "On target. Hold the note."
-                    feedbackKind = .onTarget
-                }
-            case .needsAdjustment:
-                armed = true
-                hold = max(0, hold - dt * 2)
-                if hold == 0 { onTargetSamples.removeAll() }
-                if c > 0 {
-                    feedback = "A little higher than the note. Come down slightly."
-                    feedbackKind = .high
-                } else {
-                    feedback = "A little lower than the note. Raise your pitch."
-                    feedbackKind = .low
-                }
-            }
-            holdProgress = min(hold / holdRequired, 1)
-            if hold >= holdRequired { advance(auto: true, time: frame.time) }
-        } else {
-            // Silence / unvoiced audio is never treated as a wrong note.
-            silentFrames += 1
-            if silentFrames >= 2 { armed = true }
-            if silentFrames > 4 {
-                detectedHz = nil
-                cents = nil
-                hold = 0
-                holdProgress = 0
-                onTargetSamples.removeAll()
-            }
+        guard phase == .running, let start = sessionStart, frame.time.isFinite else { return }
+        level = min(1, max(0, frame.level / 0.15).squareRoot())
+        let elapsed = frame.time - start
+        guard let note = timeline.note(at: elapsed) else { return } // count-in/tail excluded
+        let raw = frame.rawFrequency.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        let observation = PracticeObservation(time: elapsed, frequency: raw, confidence: frame.confidence.isFinite ? frame.confidence : 0)
+        observations.append(observation)
+        // Smoothed display is independent of scoring and never bridges unvoiced data.
+        let visible = observation.isReliable ? frame.frequency : nil
+        graphPoints.append(GraphPoint(t: frame.time, hz: visible, targetHz: note.target.frequency))
+        if let first = graphPoints.first, frame.time - first.t > 16 { graphPoints.removeAll { frame.time - $0.t > 16 } }
+        guard observation.isReliable, let f = raw else {
+            detectedHz = nil; cents = nil
+            feedback = "No reliable voice. The guided target continues."
             feedbackKind = .neutral
-            feedback = frame.time - lastVoicedTime > 2.5 ? "No clear voice detected." : "Listening..."
+            return
+        }
+        lastVoicedTime = frame.time
+        detectedHz = f
+        let error = PitchMath.cents(detected: f, expected: note.target.frequency)
+        cents = error
+        switch thresholds.classify(error) {
+        case .veryAccurate: feedback = "Very accurate. Follow the guided tempo."; feedbackKind = .perfect
+        case .onTarget: feedback = "On target. Follow the guided tempo."; feedbackKind = .onTarget
+        case .needsAdjustment:
+            feedback = abs(error) > 100 ? "Different note or octave; check the current target." : (error > 0 ? "Slightly high" : "Slightly low")
+            feedbackKind = error > 0 ? .high : .low
         }
     }
 
-    private func advance(auto: Bool, time: Double) {
-        let target = targets[currentIndex]
-        let samples = auto ? (onTargetSamples.isEmpty ? allSamples : onTargetSamples)
-                           : Array(allSamples.suffix(10))
-        if let med = PitchMath.median(samples) {
-            results[currentIndex] = NoteResult(index: currentIndex, swar: target.label,
-                                               expectedHz: target.frequency, detectedHz: med,
-                                               signedCents: PitchMath.cents(detected: med, expected: target.frequency),
-                                               autoCompleted: auto)
-        } else {
-            results[currentIndex] = NoteResult(index: currentIndex, swar: target.label,
-                                               expectedHz: target.frequency, detectedHz: nil,
-                                               signedCents: nil, autoCompleted: auto)
-        }
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    private struct Audit: Codable {
+        let schemaVersion: Int
+        let createdUTC: String
+        let source: String
+        let saHz: Double
+        let timeline: PracticeTimeline
+        let observations: [PracticeObservation]
+        let thresholds: AccuracyThresholds
+        let summary: PracticeSummary
+        let results: [NoteResult]
+        let capture: PitchEngineDiagnostics
+        let incomplete: Bool
+        let reason: String?
+    }
 
-        currentIndex += 1
-        resetNoteState(time: time)
-        if currentIndex >= targets.count {
-            finish()
-            return
-        }
-        // Repeated pitch (Sa' Sa'): require a short break or movement before counting again.
-        armed = targets[currentIndex].frequency != target.frequency
-        detectedHz = nil
-        cents = nil
-        feedbackKind = .neutral
-        feedback = "Next: \(targets[currentIndex].label)"
+    private func writeAudit(incomplete: Bool) {
+        do {
+            let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("SwarSaathiReports", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let scored = timeline.score(observations: observations, thresholds: thresholds)
+            let audit = Audit(schemaVersion: 1, createdUTC: ISO8601DateFormatter().string(from: Date()), source: "AVAudioEngine microphone raw YIN observations", saHz: sa, timeline: timeline,
+                              observations: observations, thresholds: thresholds, summary: scored.summary, results: scored.results,
+                              capture: engine.diagnostics,
+                              incomplete: incomplete, reason: incompleteReason)
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let url = directory.appendingPathComponent("practice-\(UUID().uuidString).json")
+            try encoder.encode(audit).write(to: url, options: .atomic)
+            auditURL = url
+            NSLog("SwarSaathi audit saved %@; %.1f%%, observations %d", url.lastPathComponent, scored.summary.accuracyPercent, observations.count)
+        } catch { errorMessage = "Report remains on screen, but JSON export failed: \(error.localizedDescription)" }
     }
 }

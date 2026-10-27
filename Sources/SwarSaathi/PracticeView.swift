@@ -3,9 +3,10 @@ import UIKit
 
 struct PracticeView: View {
     @StateObject private var vm: PracticeViewModel
+    @Environment(\.scenePhase) private var scenePhase
 
-    init(sa: Double, engine: PitchEngine) {
-        _vm = StateObject(wrappedValue: PracticeViewModel(sa: sa, engine: engine))
+    init(sa: Double, engine: PitchEngine, lowerHz: Double? = nil, upperHz: Double? = nil) {
+        _vm = StateObject(wrappedValue: PracticeViewModel(sa: sa, engine: engine, lowerHz: lowerHz, upperHz: upperHz))
     }
 
     var body: some View {
@@ -20,6 +21,7 @@ struct PracticeView: View {
                     ErrorBanner(message: b)
                 }
 
+                configurationCard
                 liveCard
                 graphCard
                 controls
@@ -27,7 +29,11 @@ struct PracticeView: View {
 
                 if vm.phase == .finished {
                     SummaryView(summary: vm.summary, results: vm.results,
-                                targets: vm.targets) { vm.start() }
+                                targets: vm.targets) { vm.prepareAgain() }
+                    if let url = vm.auditURL {
+                        ShareLink(item: url) { Label("Share audit JSON", systemImage: "square.and.arrow.up") }
+                            .font(.subheadline.bold())
+                    }
                 }
             }
             .padding(20)
@@ -35,14 +41,43 @@ struct PracticeView: View {
         }
         .background(Color.swarBackground.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             vm.shutdown()
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background {
+                UIApplication.shared.isIdleTimerDisabled = false
+                vm.shutdown()
+            } else if phase == .active {
+                UIApplication.shared.isIdleTimerDisabled = true
+            }
+        }
     }
 
     // MARK: Sections
+
+    private var configurationCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Guided exercise").font(.headline)
+            Picker("Alankaar", selection: $vm.selectedExerciseIndex) {
+                ForEach(Array(vm.exercises.enumerated()), id: \.offset) { index, exercise in
+                    Text(exercise.name).tag(index)
+                }
+            }
+            .disabled(vm.phase == .running || vm.referencePlaying || vm.isStarting)
+            Stepper("Tempo: \(Int(vm.bpm)) BPM", value: $vm.bpm, in: 40...120, step: 4)
+                .disabled(vm.phase == .running || vm.referencePlaying || vm.isStarting)
+            Text("Illustrative Shuddha ratios. Listen to the full reference, then sing once after the three-beat count-in. Targets follow the clock even when a note is wrong or missing.")
+                .font(.footnote).foregroundColor(.secondary)
+            if vm.exercises.isEmpty {
+                Text("No exercise fits the measured comfortable range. Return to calibration.")
+                    .font(.footnote).foregroundColor(.swarOrange)
+            }
+        }.card()
+    }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -96,6 +131,8 @@ struct PracticeView: View {
                 .animation(.easeInOut(duration: 0.15), value: vm.feedback)
             ProgressView(value: vm.holdProgress)
                 .tint(.swarGreen)
+            Text("Guided note progress · not a successful-hold requirement")
+                .font(.caption2).foregroundColor(.secondary)
             if vm.phase == .running {
                 HStack(spacing: 8) {
                     Image(systemName: "mic.fill").foregroundColor(.swarPurple)
@@ -113,7 +150,9 @@ struct PracticeView: View {
                            ladder: vm.ladder,
                            currentTarget: vm.currentTarget.frequency,
                            thresholds: vm.thresholds,
-                           active: vm.phase == .running)
+                           active: vm.phase == .running,
+                           timeline: vm.timeline,
+                           sessionStart: vm.sessionStart)
                 .frame(height: 300)
             HStack(spacing: 16) {
                 legend(.swarPurple, "Target note")
@@ -136,15 +175,17 @@ struct PracticeView: View {
     private var controls: some View {
         Group {
             if vm.phase == .running {
-                HStack(spacing: 12) {
-                    Button { vm.skipNote() } label: { Label("Next Note", systemImage: "forward.fill") }
-                        .buttonStyle(PrimaryButtonStyle(filled: false))
-                    Button { vm.finishEarly() } label: { Label("Stop", systemImage: "stop.fill") }
-                        .buttonStyle(PrimaryButtonStyle())
-                }
+                Button { vm.finishEarly() } label: { Label("Stop and report incomplete attempt", systemImage: "stop.fill") }
+                    .buttonStyle(PrimaryButtonStyle())
             } else if vm.phase == .idle {
+                Button { vm.referencePlaying ? vm.stopReference() : vm.playReference() } label: {
+                    Label(vm.referencePlaying ? "Stop reference" : "Play reference Alankaar", systemImage: vm.referencePlaying ? "stop.fill" : "play.fill")
+                }
+                .buttonStyle(PrimaryButtonStyle(filled: false))
+                .disabled(vm.isStarting || vm.exercises.isEmpty)
                 Button { vm.start() } label: { Label("Start Practice", systemImage: "mic.fill") }
                     .buttonStyle(PrimaryButtonStyle())
+                    .disabled(!vm.canStart)
             }
         }
     }
@@ -152,7 +193,7 @@ struct PracticeView: View {
     private var sequenceCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Alankaar").font(.headline)
-            Text("Each row is one group of four notes.")
+            Text("One beat per note. Missing notes remain in the full-exercise score.")
                 .font(.footnote)
                 .foregroundColor(.secondary)
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
@@ -175,14 +216,16 @@ struct NoteCardView: View {
     let thresholds: AccuracyThresholds
 
     private var accuracy: Accuracy? {
-        result?.signedCents.map { thresholds.classify($0) }
+        guard let result = result else { return nil }
+        if result.accuracyPercent < 80 { return .needsAdjustment }
+        return result.signedCents.map { thresholds.classify($0) }
     }
 
     private var icon: String {
         if isCurrent { return "waveform" }
         guard let r = result else { return "circle" }
         if r.detectedHz == nil { return "minus.circle" }
-        return accuracy == .needsAdjustment ? "exclamationmark.circle.fill" : "checkmark.circle.fill"
+        return r.accuracyPercent < 80 ? "exclamationmark.circle.fill" : "checkmark.circle.fill"
     }
 
     var body: some View {
@@ -191,6 +234,10 @@ struct NoteCardView: View {
             Text("\(Int(target.frequency.rounded())) Hz")
                 .font(.caption2)
                 .foregroundColor(.secondary)
+            if let result = result {
+                Text(String(format: "%.0f%% match", result.accuracyPercent))
+                    .font(.caption2)
+            }
             Image(systemName: icon)
                 .font(.caption)
                 .foregroundColor(isCurrent ? .swarPurple : (accuracy?.color ?? .gray.opacity(0.4)))

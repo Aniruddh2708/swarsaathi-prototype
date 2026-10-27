@@ -36,7 +36,7 @@ struct TuningSystem {
 
 // MARK: - Alankaar
 
-struct NoteTarget: Identifiable {
+struct NoteTarget: Identifiable, Codable {
     let index: Int
     let label: String
     let ratio: Double
@@ -60,6 +60,9 @@ struct Alankaar {
         "Sa", "Re", "Ga", "Ma", "Pa", "Dha", "Ni", "Sa'",
         "Sa'", "Ni", "Dha", "Pa", "Ma", "Ga", "Re", "Sa"
     ])
+
+    static let fiveNote = Alankaar(name: "Sa Re Ga Re Sa", labels: ["Sa", "Re", "Ga", "Re", "Sa"])
+    static let demoExercises = [fiveNote, standard]
 }
 
 // MARK: - Accuracy thresholds (experimental, configurable)
@@ -68,7 +71,7 @@ enum Accuracy {
     case veryAccurate, onTarget, needsAdjustment
 }
 
-struct AccuracyThresholds {
+struct AccuracyThresholds: Codable {
     var veryAccurateCents: Double = 25
     var onTargetCents: Double = 50
 

@@ -27,7 +27,7 @@ struct SummaryView: View {
                 tile("Notes attempted", "\(summary.attempted) of \(summary.total)")
                 tile("Sung on target", "\(summary.onTarget)")
                 tile("Need improvement", "\(summary.needsImprovement)")
-                tile("Avg. deviation", String(format: "%.0f cents", summary.avgAbsCents))
+                tile("Voice coverage", String(format: "%.0f%%", summary.reliableCoveragePercent))
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -48,8 +48,6 @@ struct SummaryView: View {
                         .foregroundStyle(by: .value("Series", "Target"))
                 }
                 ForEach(detected) { r in
-                    LineMark(x: .value("Note", r.index), y: .value("Hz", r.detectedHz ?? 0))
-                        .foregroundStyle(by: .value("Series", "You"))
                     PointMark(x: .value("Note", r.index), y: .value("Hz", r.detectedHz ?? 0))
                         .foregroundStyle(by: .value("Series", "You"))
                 }
@@ -66,10 +64,25 @@ struct SummaryView: View {
                 }
             }
             .frame(height: 220)
+            Text("Voice points show medians of all reliable observations, including wrong pitches. Missing notes have no point; durations and raw observations determine the score.")
+                .font(.caption).foregroundColor(.secondary)
 
             Text("This measures pitch matching only. It does not judge complete musical correctness such as gamak, rhythm, or expression.")
                 .font(.footnote)
                 .foregroundColor(.secondary)
+
+            ForEach(results.compactMap { $0 }) { result in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(result.index + 1). \(result.swar) · \(String(format: "%.1f%%", result.accuracyPercent)) pitch match")
+                        .font(.subheadline.bold())
+                    Text("Correct \(result.correctFrames)/\(result.expectedFrames) cells · voiced \(result.voicedFrames)/\(result.expectedFrames) · missing \(String(format: "%.2f", result.missingDuration)) s")
+                        .font(.caption).foregroundColor(.secondary)
+                    Text(result.medianAbsoluteCents.map { String(format: "Median absolute error: %.1f cents", $0) } ?? "No reliable voice measured")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+            }
+            Text(summary.limitations.joined(separator: " "))
+                .font(.footnote).foregroundColor(.secondary)
 
             Button("Practice Again", action: onRestart)
                 .buttonStyle(PrimaryButtonStyle())

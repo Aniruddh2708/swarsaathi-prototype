@@ -9,11 +9,14 @@ struct PitchGraphView: View {
     let currentTarget: Double
     let thresholds: AccuracyThresholds
     let active: Bool
+    var timeline: PracticeTimeline? = nil
+    var sessionStart: Double? = nil
     var window: Double = 8   // seconds shown
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !active)) { _ in
-            let now = active ? CACurrentMediaTime() : (points.last?.t ?? CACurrentMediaTime())
+            let end = sessionStart.map { $0 + (timeline?.duration ?? 0) }
+            let now = active ? CACurrentMediaTime() : (end ?? points.last?.t ?? CACurrentMediaTime())
             Canvas { context, size in
                 render(context, size: size, now: now)
             }
@@ -55,8 +58,8 @@ struct PitchGraphView: View {
         data.clip(to: Path(plot))
 
         func drawTarget(_ hz: Double, from x0: CGFloat, to x1: CGFloat) {
-            let top50 = yPos(hz * pow(2, 50.0 / 1200)), bot50 = yPos(hz * pow(2, -50.0 / 1200))
-            let top25 = yPos(hz * pow(2, 25.0 / 1200)), bot25 = yPos(hz * pow(2, -25.0 / 1200))
+            let top50 = yPos(hz * pow(2, thresholds.onTargetCents / 1200)), bot50 = yPos(hz * pow(2, -thresholds.onTargetCents / 1200))
+            let top25 = yPos(hz * pow(2, thresholds.veryAccurateCents / 1200)), bot25 = yPos(hz * pow(2, -thresholds.veryAccurateCents / 1200))
             data.fill(Path(CGRect(x: x0, y: top50, width: max(0, x1 - x0), height: bot50 - top50)),
                       with: .color(Color.swarPurple.opacity(0.10)))
             data.fill(Path(CGRect(x: x0, y: top25, width: max(0, x1 - x0), height: bot25 - top25)),
@@ -67,19 +70,17 @@ struct PitchGraphView: View {
             data.stroke(line, with: .color(.swarPurple), style: StrokeStyle(lineWidth: 2.5))
         }
 
-        if points.isEmpty {
-            drawTarget(currentTarget, from: plot.minX, to: plot.maxX)
-        } else {
-            var i = 0
-            while i < points.count {
-                let tHz = points[i].targetHz
-                var j = i
-                while j + 1 < points.count && points[j + 1].targetHz == tHz { j += 1 }
-                let x0 = max(plot.minX, xPos(points[i].t))
-                let x1 = j == points.count - 1 ? plot.maxX : xPos(points[j + 1].t)
-                drawTarget(tHz, from: x0, to: x1)
-                i = j + 1
+        if let timeline = timeline, let start = sessionStart {
+            // Expected segments come from the clocked score even in silence.
+            // No target point is inferred from a microphone observation.
+            for note in timeline.notes {
+                let x0 = xPos(start + note.start), x1 = xPos(start + note.end)
+                if x1 >= plot.minX && x0 <= plot.maxX {
+                    drawTarget(note.target.frequency, from: max(plot.minX, x0), to: min(plot.maxX, x1))
+                }
             }
+        } else {
+            drawTarget(currentTarget, from: plot.minX, to: plot.maxX)
         }
 
         // Detected pitch line (gaps for silence)

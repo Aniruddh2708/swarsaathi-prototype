@@ -1,0 +1,41 @@
+Building for production...
+[0/9] Write sources
+[2/9] Write swift-version--245431BCDE2E4068.txt
+[4/10] Compiling SwarSaathiCore MusicTheory.swift
+[5/11] Compiling SwarSaathiCoreTests PitchDetectorTests.swift
+[5/11] /workspace/swift-dsp-baseline/.build/x86_64-unknown-linux-gnu/release/SwarSaathiDSPBaselinePackageDiscoveredTests.derived/all-discovered-tests.swift
+[6/11] Write sources
+[8/12] Compiling SwarSaathiDSPBaselinePackageDiscoveredTests SwarSaathiCoreTests.swift
+[8/12] /workspace/swift-dsp-baseline/.build/x86_64-unknown-linux-gnu/release/SwarSaathiDSPBaselinePackageTests.derived/runner.swift
+[9/12] Write sources
+[11/13] Compiling SwarSaathiDSPBaselinePackageTests runner.swift
+[11/13] Write Objects.LinkFileList
+[12/13] Linking SwarSaathiDSPBaselinePackageTests.xctest
+Build complete! (9.43s)
+Test Suite 'All tests' started at 2026-10-27 07:29:02.634
+Test Suite 'release.xctest' started at 2026-10-27 07:29:02.635
+Test Suite 'PitchDetectorTests' started at 2026-10-27 07:29:02.635
+Test Case 'PitchDetectorTests.testCleanSyntheticFrequencyAccuracy' started at 2026-10-27 07:29:02.635
+DSP_CLEAN_METRICS cases=44 max_absolute_cents=0.43862413069685574 median_absolute_cents=0.02211654688589393 synthetic_only=true
+Test Case 'PitchDetectorTests.testCleanSyntheticFrequencyAccuracy' passed (0.065 seconds)
+Test Case 'PitchDetectorTests.testDefaultLowerSearchBoundaryIsDetected' started at 2026-10-27 07:29:02.700
+Test Case 'PitchDetectorTests.testDefaultLowerSearchBoundaryIsDetected' passed (0.101 seconds)
+Test Case 'PitchDetectorTests.testHarmonicRichTones' started at 2026-10-27 07:29:02.802
+Test Case 'PitchDetectorTests.testHarmonicRichTones' passed (0.004 seconds)
+Test Case 'PitchDetectorTests.testRawOctaveTransitionRemainsAnOctave' started at 2026-10-27 07:29:02.806
+Test Case 'PitchDetectorTests.testRawOctaveTransitionRemainsAnOctave' passed (0.002 seconds)
+Test Case 'PitchDetectorTests.testSilenceDoesNotBecomePitch' started at 2026-10-27 07:29:02.808
+Test Case 'PitchDetectorTests.testSilenceDoesNotBecomePitch' passed (0.0 seconds)
+Test Case 'PitchDetectorTests.testSmootherDoesNotBridgeUnvoicedFrame' started at 2026-10-27 07:29:02.808
+/workspace/swift-dsp-baseline/Tests/SwarSaathiCoreTests/PitchDetectorTests.swift:65: error: PitchDetectorTests.testSmootherDoesNotBridgeUnvoicedFrame : XCTAssertNil failed: "220.00000000000006" - A missing microphone pitch must break the graph trace immediately
+Test Case 'PitchDetectorTests.testSmootherDoesNotBridgeUnvoicedFrame' failed (0.0 seconds)
+Test Suite 'PitchDetectorTests' failed at 2026-10-27 07:29:02.808
+	 Executed 6 tests, with 1 failure (0 unexpected) in 0.173 (0.173) seconds
+Test Suite 'release.xctest' failed at 2026-10-27 07:29:02.808
+	 Executed 6 tests, with 1 failure (0 unexpected) in 0.173 (0.173) seconds
+Test Suite 'All tests' failed at 2026-10-27 07:29:02.808
+	 Executed 6 tests, with 1 failure (0 unexpected) in 0.173 (0.173) seconds
+◇ Test run started.
+↳ Testing Library Version: 6.2.1 (c9d57c83568b06d)
+↳ Target Platform: x86_64-unknown-linux-gnu
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

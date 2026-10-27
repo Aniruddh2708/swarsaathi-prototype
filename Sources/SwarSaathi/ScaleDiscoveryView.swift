@@ -4,6 +4,7 @@ struct ScaleDiscoveryView: View {
     @ObservedObject var vm: ScaleViewModel
     let engine: PitchEngine
     @State private var showPractice = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ScrollView {
@@ -26,13 +27,14 @@ struct ScaleDiscoveryView: View {
 
                 if vm.isComplete {
                     analysisCard
-                    saCard
+                    if vm.recommendation != nil { saCard }
                     Button {
                         showPractice = true
                     } label: {
                         Label("Start Alankaar Practice", systemImage: "music.note.list")
                     }
                     .buttonStyle(PrimaryButtonStyle())
+                    .disabled(!vm.canPractice)
                     .padding(.bottom, 24)
                 }
             }
@@ -42,9 +44,15 @@ struct ScaleDiscoveryView: View {
         .background(Color.swarBackground.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(isPresented: $showPractice) {
-            PracticeView(sa: vm.sa, engine: engine)
+            PracticeView(sa: vm.sa, engine: engine,
+                         lowerHz: vm.recommendation?.lowerHz, upperHz: vm.recommendation?.upperHz)
         }
+        .onAppear { vm.activate() }
         .onDisappear { vm.stopIfNeeded() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { vm.activate() }
+            else if phase == .background { vm.stopIfNeeded() }
+        }
     }
 
     private var analysisCard: some View {
@@ -57,7 +65,7 @@ struct ScaleDiscoveryView: View {
             if let semis = vm.rangeSemitones {
                 Divider()
                 HStack {
-                    Text("Estimated vocal range").foregroundColor(.secondary)
+                    Text("Measured sample span").foregroundColor(.secondary)
                     Spacer()
                     Text(String(format: "%.1f octaves (%.0f semitones)", semis / 12, semis))
                         .fontWeight(.semibold)
@@ -65,11 +73,11 @@ struct ScaleDiscoveryView: View {
                 .font(.subheadline)
             }
             if vm.orderLooksWrong {
-                Text("Your low, comfortable and high notes aren't in rising order. You may want to record them again.")
+                Text("The guided samples changed order. Reversals beyond their measured uncertainty require a retry; overlapping measurements can remain usable.")
                     .font(.footnote)
                     .foregroundColor(.swarOrange)
             }
-            Text("This is your vocal range. It is not your musical scale; we use your comfortable note as Sa.")
+            Text("Three short vowels only approximate a comfortable range. A trial Sa is fitted to the measured boundaries and the five-note exercise, then explicitly confirmed after listening.")
                 .font(.footnote)
                 .foregroundColor(.secondary)
         }
@@ -91,14 +99,25 @@ struct ScaleDiscoveryView: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Recommended Sa (tonic)", systemImage: "tuningfork")
                 .font(.headline)
-            Text("Your Sa: \(Int(vm.sa)) Hz")
+            Text("Trial Sa: \(String(format: "%.2f", vm.sa)) Hz")
                 .font(.system(size: 36, weight: .bold, design: .rounded))
                 .foregroundStyle(LinearGradient(colors: [.swarBlue, .swarPurple],
                                                 startPoint: .leading, endPoint: .trailing))
             Text("Nearest musical note for reference: \(PitchMath.noteText(vm.sa)). Western note names don't define the Indian classical scale.")
                 .font(.footnote)
                 .foregroundColor(.secondary)
-            Text("Adjust if it doesn't feel right:")
+            if let recommendation = vm.recommendation {
+                Text(recommendation.explanation)
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+            Button(vm.isReferencePlaying ? "Playing suggested Sa…" : "Play suggested Sa") { vm.playReference() }
+                .buttonStyle(PrimaryButtonStyle(filled: false))
+                .disabled(vm.isReferencePlaying || !vm.recordingControlsEnabled || vm.activeTest != nil)
+            Button(vm.isConfirmed ? "Sa confirmed" : "Confirm this Sa") { vm.confirmSa() }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(!vm.canConfirm || vm.isConfirmed)
+            Text("Adjust within the measured exercise boundaries, then listen and confirm again:")
                 .font(.subheadline)
             HStack(spacing: 10) {
                 adjustButton("−1 semitone") { vm.shiftSa(semitones: -1) }
@@ -130,7 +149,7 @@ struct TestCardView: View {
 
     private var isActive: Bool { vm.activeTest == test }
     private var saved: Double? { vm.results[test] }
-    private var enabled: Bool { vm.isUnlocked(test) && (vm.activeTest == nil || isActive) }
+    private var enabled: Bool { vm.recordingControlsEnabled && vm.isUnlocked(test) && (vm.activeTest == nil || isActive) }
 
     private var buttonTitle: String {
         if isActive { return "Stop & Save" }
@@ -156,7 +175,7 @@ struct TestCardView: View {
                     Text(hzText(vm.liveFrequency))
                         .font(.system(size: 44, weight: .bold, design: .rounded))
                         .foregroundColor(vm.liveFrequency == nil ? .secondary : .swarBlue)
-                    Text(vm.liveFrequency == nil ? "Listening… sing and hold a steady note." : "Hold it steady, then tap Stop & Save.")
+                    Text(vm.liveFrequency == nil ? "Listening… hold one comfortable steady Aa for about three seconds." : "Hold steady. The sample saves automatically after three seconds, or tap Stop & Save.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                     LevelBar(level: vm.level)
