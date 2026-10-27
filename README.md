@@ -1,5 +1,15 @@
 # SwarSaathi prototype
 
+## iPad / iPhone browser demo
+
+The `web/` application runs entirely in a modern Safari browser, using the device microphone. **No Python installation or running iMac is required.** Pitch analysis is local JavaScript in an independent Worker; no voice audio is uploaded. All three capabilities are included: measured Sa recommendation, three guided Alankars and live pitch-match feedback/reports.
+
+To publish with GitHub Pages, open the repository's **Settings → Pages**, choose **Deploy from a branch**, select **main** and **/ (root)**, and Save. Once GitHub reports deployment complete, open `https://aniruddh2708.github.io/swarsaathi-prototype/` in Safari. This URL is the intended deployment location; creating source files or pushing them does not by itself verify that Pages is enabled. See [iPad/iPhone setup and validation](docs/IPAD_DEMO.md).
+
+Browser math tests: `node --test web/tests/core.test.mjs` (Node 18+; no npm packages). Browser integration validation uses optional development-only Playwright, not an application dependency. Physical iPad/iPhone microphone, Safari audio routing, and genuine-vocal accuracy still require testing on your device.
+
+## Python desktop version
+
 A Python desktop proof of concept for **Find My Sa → guided Alankar practice → pitch-match feedback**. The selected repository was initially empty; this implementation follows the supplied prototype specification.
 
 The detector measures microphone audio independently of the expected melody. Sa is a comfortable tonic recommendation from three short voice samples, not an objectively fixed personal scale. The initial pitch model is a documented 12-tone equal-tempered (12-TET) approximation; it is not a validated Hindustani assessment standard.

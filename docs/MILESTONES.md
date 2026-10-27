@@ -1,5 +1,16 @@
 # Implementation and validation ledger
 
+## Portable browser adaptation — subsequent scope change
+
+- **Implemented:** standalone responsive Safari-targeted web application with the same three features; local Worker YIN and AudioWorklet capture, measured calibration/confirmed Sa, shared exercise JSON, reference-completion gating, fixed-tempo independent pitch comparison, graph, note scores and local JSON report downloads. No running Python host/iMac or third-party browser dependencies are required after static HTTPS publishing.
+- **Tests passed:** 100 current Python regressions, 15 Node DSP/calibration/scoring/transport tests and 12 complete Chromium browser checks. The latter use explicitly synthetic microphone MediaStreams through the real capture/DSP path. No browser page errors occurred.
+- **Tests failed:** none unresolved in these runs. An initially late synthetic test generator was diagnosed from exported raw pitch transitions; its scheduling was corrected without changing scoring/tolerances. See `IPAD_DEMO.md` for preserved failure evidence and harness details.
+- **Hardware tested:** no physical Apple device or genuine singer. Chromium automation is not Safari/iPadOS acceptance; WebKit was unavailable on this validation machine.
+- **Measured results:** 44 clean browser tone cases, maximum 0.432464-cent error; synthetic full browser melody 100%, silent attempt 0%. Phone/tablet layouts at 390/1,024 CSS pixels fit without page overflow. These percentages are synthetic test outcomes only.
+- **Files changed:** `web/` modules, page/styles and Node tests; root `index.html`/`.nojekyll`; `tools/test_browser.py`; README and browser setup/validation documentation. Existing Python functionality remains available.
+- **Remaining limitations:** GitHub API access was denied by the managed proxy, so automatic Pages enablement and the live HTTPS site could not be verified. Real Safari permission/playback, calibration and voice accuracy/visible delay still need testing.
+- **Next action:** enable GitHub Pages from **main / (root)** in repository Settings → Pages. After GitHub reports deployment, use its HTTPS URL on iPad/iPhone Safari and follow `IPAD_DEMO.md`. Environment startup instructions were updated in the saved draft; that configuration save is separate from website publishing.
+
 The requested software has been implemented in the originally empty repository. The final software regression run executed **99 tests: 99 passed, 0 failed, 0 errors, 0 skipped, 0 expected failures**. Exact test names, outcomes, and timings are in `artifacts/test_results.json`; console output is in `artifacts/test_run.log`. Hardware cases are **unrun**, not silently counted as skipped or passed unit tests.
 
 The cloud instance runs Python 3.12.14 on Debian. Native PortAudio loads, but enumeration returns no input devices. An attempted real recording fails actionably and creates no WAV. There is no display or `/dev/snd`. The hardware portion of every relevant acceptance checkpoint therefore remains pending. Independent software milestones proceeded without declaring those checkpoints passed.

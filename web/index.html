@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#122c37"><meta name="description" content="Measured Sa calibration and guided singing pitch practice.">
+  <title>SwarSaathi · Singing practice</title><link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header><span class="eyebrow">SING · LISTEN · REFINE</span><h1>SwarSaathi<span>स्वरसाथी</span></h1>
+    <p>Find a comfortable Sa. Practise an Alankar. See how your voice matches.</p></header>
+  <nav aria-label="Practice steps"><span id="step1" class="current">01 &nbsp; Find my Sa</span><span id="step2">02 &nbsp; Choose practice</span><span id="step3">03 &nbsp; Sing & review</span></nav>
+  <p id="message" role="status" aria-live="polite">Loading the exercise library…</p>
+  <section id="calibration" class="card">
+    <div class="section-head"><div><span class="eyebrow">START WITH YOUR VOICE</span><h2>Find my Sa</h2></div><span class="tag">3 short recordings</span></div>
+    <p>Sa is a relative tonic. Three comfortable vowels help us suggest a range for these exercises, rather than a fixed personal scale.</p>
+    <div class="controls"><label>Microphone<select id="device"><option value="">Default microphone</option></select></label>
+      <label>Analysis window<select id="window"><option value="2048">2048 · shorter delay</option><option value="4096">4096 · lower voices</option></select></label>
+      <button id="enable" disabled>Enable microphone</button></div>
+    <div class="level-row"><span>Input level</span><meter id="level" min="0" max=".2" value="0"></meter><span id="detected">No voice measured</span></div>
+    <div class="prompt"><span id="stage" class="eyebrow">SAMPLE 1 OF 3</span><h3 id="stageName">Comfortable low</h3><p id="instruction">Sing a comfortably low “Aa” for three seconds. Do not strain.</p><progress id="recordProgress" max="3" value="0"></progress></div>
+    <button id="record" class="primary" disabled>Record comfortable low · 3 seconds</button>
+    <ol id="samples"><li>Low: not recorded</li><li>Middle: not recorded</li><li>High: not recorded</li></ol>
+    <div id="recommendation" hidden><h3 id="saName"></h3><p id="range"></p><p id="explanation"></p>
+      <div class="controls"><button id="playSa">Play suggested Sa</button><button id="confirm" class="primary">Confirm this Sa</button></div></div>
+    <button id="retry" class="text-button">Retry calibration</button>
+  </section>
+  <section id="setup" class="card" hidden>
+    <span class="eyebrow">YOUR GUIDED PRACTICE</span><h2>Choose an Alankar</h2><p id="confirmed"></p>
+    <div class="controls"><label>Exercise<select id="exercise"></select></label><label>Tempo · BPM<input id="bpm" type="number" min="40" max="120" step="1" value="72" inputmode="numeric"></label></div>
+    <p id="sequence" class="sequence"></p>
+    <p>Listen to the full reference, then sing one repetition after a three-beat visual count-in. Headphones help prevent reference sound leaking into the microphone.</p>
+    <div class="controls"><button id="reference">Play reference Alankar</button><button id="start" class="primary" disabled>Start practice</button></div>
+    <p id="referenceStatus">Listen to the complete reference before starting.</p><button id="back" class="text-button">Return to calibration</button>
+  </section>
+  <section id="practice" class="card" hidden>
+    <span class="eyebrow">SING & REVIEW</span><h2 id="practiceTitle">Pitch mapping</h2>
+    <div class="readouts"><div><span>EXPECTED</span><strong id="expected">—</strong></div><div><span>ACTUAL VOICE</span><strong id="actual">—</strong></div><div><span>FEEDBACK</span><strong id="feedback">Waiting</strong></div></div>
+    <p id="deviation">Raw deviation unavailable</p><div class="legend"><span class="target-key">Expected</span><span class="voice-key">Actual voice</span></div>
+    <canvas id="graph" role="img" aria-label="Expected and actual pitch in continuous cents relative to confirmed Sa, over time"></canvas>
+    <p id="score" class="score">Pitch-match progress pending</p>
+    <div class="table-scroll"><table><thead><tr><th>Note</th><th>Pitch match</th><th>Voice coverage</th><th>Missing</th><th>Median |error|</th></tr></thead><tbody id="results"></tbody></table></div>
+    <p id="limitations"></p><p id="improvements"></p><p id="metrics"></p>
+    <div class="controls"><button id="again" hidden>Practice again</button><button id="export" hidden>Save report</button><button id="finish" hidden>Finish</button></div>
+  </section>
+  <div class="bottom-controls"><button id="stop" hidden>Stop audio / end attempt</button></div>
+  <footer>Experimental 12-tone equal-tempered approximation · ±30-cent pitch-match tolerance.<br>
+    Voice analysis stays on this device. No audio is uploaded. Keep Safari open and the device unlocked during an attempt.<br>
+    Prototype: device-specific voice accuracy and response delay require validation.</footer>
+</main><script type="module" src="app.mjs"></script>
+</body></html>
