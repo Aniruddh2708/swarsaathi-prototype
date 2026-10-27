@@ -1,0 +1,25 @@
+[
+  {"id":"alankar_1","name":"Alankar 1","notes":[
+    {"swara":"Sa","semitone_offset":0,"octave_offset":0,"beats":1},
+    {"swara":"Re","semitone_offset":2,"octave_offset":0,"beats":1},
+    {"swara":"Ga","semitone_offset":4,"octave_offset":0,"beats":1},
+    {"swara":"Re","semitone_offset":2,"octave_offset":0,"beats":1},
+    {"swara":"Sa","semitone_offset":0,"octave_offset":0,"beats":1}]},
+  {"id":"alankar_2","name":"Alankar 2","notes":[
+    {"swara":"Sa","semitone_offset":0,"octave_offset":0,"beats":1},
+    {"swara":"Re","semitone_offset":2,"octave_offset":0,"beats":1},
+    {"swara":"Ga","semitone_offset":4,"octave_offset":0,"beats":1},
+    {"swara":"Ma","semitone_offset":5,"octave_offset":0,"beats":1},
+    {"swara":"Pa","semitone_offset":7,"octave_offset":0,"beats":1},
+    {"swara":"Ma","semitone_offset":5,"octave_offset":0,"beats":1},
+    {"swara":"Ga","semitone_offset":4,"octave_offset":0,"beats":1},
+    {"swara":"Re","semitone_offset":2,"octave_offset":0,"beats":1},
+    {"swara":"Sa","semitone_offset":0,"octave_offset":0,"beats":1}]},
+  {"id":"alankar_3","name":"Alankar 3","notes":[
+    {"swara":"Sa","semitone_offset":0,"octave_offset":0,"beats":1},
+    {"swara":"Ga","semitone_offset":4,"octave_offset":0,"beats":1},
+    {"swara":"Re","semitone_offset":2,"octave_offset":0,"beats":1},
+    {"swara":"Ma","semitone_offset":5,"octave_offset":0,"beats":1},
+    {"swara":"Ga","semitone_offset":4,"octave_offset":0,"beats":1},
+    {"swara":"Pa","semitone_offset":7,"octave_offset":0,"beats":1}]}
+]
