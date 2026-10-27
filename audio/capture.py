@@ -33,7 +33,7 @@ def _sounddevice():
 def list_input_devices() -> list[dict]:
     """Enumerate actual inputs; an empty list never creates a simulated device."""
     try:
-        return [dict(index=i, **dict(d)) for i, d in enumerate(_sounddevice().query_devices())
+        return [dict(d, index=i) for i, d in enumerate(_sounddevice().query_devices())
                 if d['max_input_channels'] > 0]
     except AudioError:
         raise

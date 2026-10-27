@@ -196,6 +196,19 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(devices[0]['index'], 1)
         self.assertEqual(devices[0]['name'], 'Mic')
 
+    def test_enumeration_accepts_sounddevice_supplied_index(self):
+        originals = [
+            dict(index=0, name='Speakers', max_input_channels=0, hostapi=0,
+                 default_samplerate=48000),
+            dict(index=1, name='Microphone Array', max_input_channels=2, hostapi=1,
+                 default_samplerate=48000)]
+        sd = SimpleNamespace(query_devices=lambda: originals)
+        with patch('audio.capture._sounddevice', return_value=sd):
+            devices = list_input_devices()
+        self.assertEqual(devices, [originals[1]])
+        self.assertIsNot(devices[0], originals[1])
+        self.assertEqual(originals[1]['index'], 1)
+
     def test_recording_does_not_overwrite_existing_file(self):
         with self.assertRaisesRegex(ValueError, 'overwrite'):
             record_wav(__file__)
