@@ -78,6 +78,13 @@ test('isolated good pitch readings do not imply a sustained accepted sample',()=
     frequency:i===100?121.1:null,quality:i===100?.9:0,voiced:i===100}));
   assert.throws(()=>summarizeSample(rows),/Reliable voice: 0.01 s.*1 accepted frames/);
 });
+test('measured close low/middle samples explain rejection despite good coverage',()=>{
+  const summaries=[221.90,223.57,321.32].map(measured);
+  assert.ok(summaries.every(s=>s.voiced_fraction>.99));
+  assert.throws(()=>recommendSa(summaries,library),/Middle.*13 cents.*100 cents/);
+  const ordered=[summaries[0],{...summaries[1],median_hz:260},summaries[2]];
+  assert.throws(()=>recommendSa(ordered,library),/span is 6.4 semitones.*at least 8/);
+});
 test('perfect, wrong, sharp, flat, missed and silent tracks have transparent scores',()=>{
   for (const [variant,expected] of [['correct',100],['wrong',0],['sharp',0],['flat',0],['missing',80],['silent',0]])
     assert.ok(Math.abs(scoreSession(timeline,observations(variant)).overall_accuracy-expected)<1e-9,variant);

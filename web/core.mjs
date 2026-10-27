@@ -128,7 +128,8 @@ export function recommendSa(summaries,library) {
   if (summaries.length!==3) inconclusive('Three samples are required.');
   for (const s of summaries) if (!Number.isFinite(s.median_hz)||s.median_hz<=0||s.voiced_seconds<1-1e-9||s.voiced_fraction<.7-1e-9||s.accepted_frames<20||s.spread_cents>80) inconclusive('Unreliable measurements.');
   const [low,middle,high]=summaries.map(s=>s.median_hz);
-  if (cents(middle,low)<100||cents(high,middle)<100) inconclusive('Low, middle and high must be distinctly ordered comfortable pitches.');
+  if (cents(middle,low)<100) inconclusive(`Middle (${middle.toFixed(2)} Hz) is ${cents(middle,low).toFixed(0)} cents relative to Low (${low.toFixed(2)} Hz). Middle must be at least 100 cents (one semitone) higher. Change pitch, not loudness, and stay comfortable.`);
+  if (cents(high,middle)<100) inconclusive(`High (${high.toFixed(2)} Hz) is ${cents(high,middle).toFixed(0)} cents relative to Middle (${middle.toFixed(2)} Hz). High must be at least 100 cents (one semitone) higher. Do not strain.`);
   const intervals=library.flatMap(a=>a.notes.map(n=>n.semitone_offset+12*n.octave_offset));
   const min=Math.min(...intervals),max=Math.max(...intervals),safeLow=low*2**(50/1200),safeHigh=high/2**(50/1200);
   const first=Math.ceil(69+12*Math.log2(safeLow/2**(min/12)/440)-1e-10);
@@ -137,7 +138,7 @@ export function recommendSa(summaries,library) {
   for (let midi=first;midi<=last;midi++) {
     const hz=440*2**((midi-69)/12); candidates.push({hz,cost:Math.abs(cents(hz*2**((min+max)/24),middle))});
   }
-  if (!candidates.length) inconclusive('No safe tonic fits the full exercise range. Do not strain to extend your voice.');
+  if (!candidates.length) inconclusive(`No safe semitone-grid Sa fits the full exercise range. Your measured low-to-high span is ${(cents(high,low)/100).toFixed(1)} semitones; these exercises need at least ${max-min+1} including the 50-cent safety margin at each edge. Do not strain to extend your voice.`);
   const best=Math.min(...candidates.map(c=>c.cost)),near=candidates.filter(c=>c.cost<=best+5+1e-9);
   const hz=near[0].hz;
   return {sa_hz:hz,note_name:noteName(hz),low_hz:safeLow,high_hz:safeHigh,measured_hz:[low,middle,high],

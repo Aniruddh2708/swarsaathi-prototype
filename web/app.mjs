@@ -1,5 +1,5 @@
 import {AudioEngine} from './audio.mjs';
-import {cents,reliable,quantile,summarizeSample,recommendSa,buildTimeline,compare,scoreSession,synthesizeTimeline,Smoother} from './core.mjs?v=calibration-feedback-1';
+import {cents,reliable,quantile,summarizeSample,recommendSa,buildTimeline,compare,scoreSession,synthesizeTimeline,Smoother} from './core.mjs?v=calibration-order-2';
 const $=id=>document.getElementById(id);
 const prompts=[['Comfortable low','Sing a comfortably low “Aa” for three seconds. Do not strain.'],
   ['Comfortable middle','Sing “Aa” at your natural, comfortable middle pitch for three seconds.'],
@@ -24,6 +24,12 @@ function controls() {
 }
 function stageUI() {
   const stage=Math.min(state.stage,2);
+  if (state.stage>=3&&!state.recommendation) {
+    $('stage').textContent='CALIBRATION INCONCLUSIVE';$('stageName').textContent='No Sa recommended yet';
+    $('instruction').textContent='All three voice samples were measured, but they do not yet support a safe recommendation. Review the explanation below and retry comfortably.';
+    $('record').textContent='Samples measured — retry needed';$('recordProgress').value=0;
+    $('recommendation').hidden=true;controls();return;
+  }
   $('stage').textContent=state.stage<3?`SAMPLE ${state.stage+1} OF 3`:'YOUR MEASURED RECOMMENDATION';
   $('stageName').textContent=state.stage<3?prompts[stage][0]:'Listen, then confirm';
   $('instruction').textContent=state.stage<3?prompts[stage][1]:'Review the proposed Sa and range. Listen to the tone, then confirm if comfortable.';
@@ -115,7 +121,7 @@ function finishSample() {
   } catch(e) {
     const error=describeError(e)+(state.stage===3?' Tap Retry calibration for a new set of samples.':' Tap Record again to retry this same step.');
     if (state.stage<3) $('recordProgress').value=0;
-    $('sampleStatus').textContent=`Sample not accepted. ${error}`;
+    $('sampleStatus').textContent=`${state.stage===3?'No Sa recommendation.':'Sample not accepted.'} ${error}`;
     message(error,true);
   }
   stageUI();

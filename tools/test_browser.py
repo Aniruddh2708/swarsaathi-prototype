@@ -159,6 +159,23 @@ def main():
             expect(page.locator('#score')).to_contain_text('Incomplete')
             expect(page.locator('#limitations')).to_contain_text('backgrounded')
             checks.append('Background visibility event marks practice incomplete and stops capture')
+            # Reproduce the reported iPad range: clear voice, near-identical low
+            # and middle. Failed recommendation must never show confirm guidance.
+            close_page=context.new_page()
+            close_page.on('pageerror',lambda e:errors.append(str(e)))
+            close_page.goto(args.base_url)
+            expect(close_page.locator('#record')).to_be_enabled()
+            close_page.evaluate(FIXTURE)
+            for stage,hz in enumerate([221.90,223.57,321.32]):
+                close_page.evaluate('(hz)=>fixture.frequency(hz)',hz)
+                close_page.locator('#record').click()
+                expect(close_page.locator('#samples li').nth(stage)).not_to_contain_text('not recorded',timeout=7000)
+            expect(close_page.locator('#stageName')).to_have_text('No Sa recommended yet')
+            expect(close_page.locator('#sampleStatus')).to_contain_text('Middle')
+            expect(close_page.locator('#sampleStatus')).to_contain_text('100 cents')
+            assert close_page.locator('#recommendation').is_hidden()
+            assert close_page.locator('#recordProgress').evaluate('(e)=>e.value')==0
+            checks.append('Reported near-identical low/middle input explains rejection without misleading confirmation')
             assert not errors, errors
             browser.close()
         result = dict(successful=True, checks=checks, page_errors=errors)
