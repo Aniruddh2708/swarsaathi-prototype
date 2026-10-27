@@ -211,7 +211,7 @@ enum CalibrationAnalyzer {
     }
 }
 
-/// Audition/confirmation is tied to the exact proposal. New measurements or any
+/// Confirmation is tied to the exact proposal; audition is optional. New measurements or any
 /// adjustment invalidate confirmation; practice cannot silently reuse it.
 struct CalibrationSession {
     private(set) var recommendation: SaRecommendation?
@@ -237,13 +237,13 @@ struct CalibrationSession {
     }
 
     var canConfirm: Bool {
-        guard let proposal = recommendation, let heard = auditionedSa else { return false }
-        return abs(proposal.saHz - heard) < 1e-9
+        guard let proposal = recommendation else { return false }
+        return proposal.supports(proposal.saHz)
     }
 
     mutating func confirm() throws {
         guard canConfirm, let proposal = recommendation else {
-            throw CalibrationFailure.inconclusive("Listen to the complete suggested Sa reference before confirming.")
+            throw CalibrationFailure.inconclusive("Record a valid comfortable range before confirming Sa.")
         }
         confirmedSa = proposal.saHz
     }

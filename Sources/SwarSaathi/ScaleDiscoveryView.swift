@@ -77,7 +77,7 @@ struct ScaleDiscoveryView: View {
                     .font(.footnote)
                     .foregroundColor(.swarOrange)
             }
-            Text("Three short vowels only approximate a comfortable range. A trial Sa is fitted to the measured boundaries and the five-note exercise, then explicitly confirmed after listening.")
+            Text("Three short vowels only approximate a comfortable range. A trial Sa is fitted to the measured boundaries and the five-note exercise, then explicitly confirmed by you. Listening to the suggested tone is optional.")
                 .font(.footnote)
                 .foregroundColor(.secondary)
         }
@@ -111,13 +111,15 @@ struct ScaleDiscoveryView: View {
                     .font(.footnote)
                     .foregroundColor(.secondary)
             }
-            Button(vm.isReferencePlaying ? "Playing suggested Sa…" : "Play suggested Sa") { vm.playReference() }
+            Button(vm.isReferencePlaying ? "Stop reference" : "Play suggested Sa (optional)") {
+                if vm.isReferencePlaying { vm.stopReference() } else { vm.playReference() }
+            }
                 .buttonStyle(PrimaryButtonStyle(filled: false))
-                .disabled(vm.isReferencePlaying || !vm.recordingControlsEnabled || vm.activeTest != nil)
+                .disabled(vm.isOpening || vm.activeTest != nil)
             Button(vm.isConfirmed ? "Sa confirmed" : "Confirm this Sa") { vm.confirmSa() }
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(!vm.canConfirm || vm.isConfirmed)
-            Text("Adjust within the measured exercise boundaries, then listen and confirm again:")
+            Text("Adjust within the measured exercise boundaries, then confirm again:")
                 .font(.subheadline)
             HStack(spacing: 10) {
                 adjustButton("−1 semitone") { vm.shiftSa(semitones: -1) }
@@ -175,7 +177,7 @@ struct TestCardView: View {
                     Text(hzText(vm.liveFrequency))
                         .font(.system(size: 44, weight: .bold, design: .rounded))
                         .foregroundColor(vm.liveFrequency == nil ? .secondary : .swarBlue)
-                    Text(vm.liveFrequency == nil ? "Listening… hold one comfortable steady Aa for about three seconds." : "Hold steady. The sample saves automatically after three seconds, or tap Stop & Save.")
+                    Text(vm.recordingStatus)
                         .font(.footnote)
                         .foregroundColor(.secondary)
                     LevelBar(level: vm.level)

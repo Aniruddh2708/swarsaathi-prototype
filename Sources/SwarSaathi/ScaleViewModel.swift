@@ -34,6 +34,8 @@ final class ScaleViewModel: ObservableObject {
     @Published private(set) var activeTest: Test?
     @Published private(set) var liveFrequency: Double?
     @Published private(set) var level: Double = 0
+    @Published private(set) var recordingStatus = ""
+    @Published private(set) var recordingElapsed: Double = 0
     @Published var errorMessage: String?
     @Published var permissionDenied = false
     @Published private(set) var sa: Double = 0
@@ -44,6 +46,7 @@ final class ScaleViewModel: ObservableObject {
     private var samples: [CalibrationObservation] = []
     private var summaries: [Test: CalibrationSample] = [:]
     private var measuredFrames: [Test: [CalibrationObservation]] = [:]
+    private var measuredDurations: [Test: Double] = [:]
     private var missCount = 0
     private let engine: PitchEngine
     private let reference = ReferencePlayer()
@@ -61,7 +64,7 @@ final class ScaleViewModel: ObservableObject {
     var comfortable: Double? { results[.comfortable] }
     var high: Double? { results[.high] }
     var recommendation: SaRecommendation? { calibration.recommendation }
-    var canConfirm: Bool { calibration.canConfirm && !isReferencePlaying && !isOpening && activeTest == nil }
+    var canConfirm: Bool { calibration.canConfirm && !isOpening && activeTest == nil }
     var canPractice: Bool { calibration.confirmedSa == sa && sa > 0 && !isReferencePlaying && !isOpening && activeTest == nil }
     var isConfirmed: Bool { calibration.confirmedSa == sa && sa > 0 }
     var recordingControlsEnabled: Bool { !isOpening && !isReferencePlaying }
@@ -109,6 +112,7 @@ final class ScaleViewModel: ObservableObject {
             self.results.removeValue(forKey: test)
             self.summaries.removeValue(forKey: test)
             self.measuredFrames.removeValue(forKey: test)
+            self.measuredDurations.removeValue(forKey: test)
             self.missCount = 0
             self.liveFrequency = nil
             self.engine.onFrame = { [weak self] frame in
@@ -123,11 +127,15 @@ final class ScaleViewModel: ObservableObject {
                 try self.engine.start()
                 self.recordingStart = CACurrentMediaTime()
                 self.activeTest = test
+                self.recordingElapsed = 0
+                self.recordingStatus = "Hold one comfortable Aa. Small fluctuations are okay."
                 self.recordingTimer?.invalidate()
-                self.recordingTimer = Timer.scheduledTimer(withTimeInterval: 3.2, repeats: false) { [weak self] _ in
+                let timer = Timer(timeInterval: CalibrationCapture.retryInterval, repeats: true) { [weak self] _ in
                     guard self?.permissionGeneration == generation else { return }
-                    self?.stopAndSave()
+                    self?.evaluateRecording()
                 }
+                self.recordingTimer = timer
+                RunLoop.main.add(timer, forMode: .common)
             } catch {
                 self.errorMessage = error.localizedDescription
             }
@@ -162,22 +170,43 @@ final class ScaleViewModel: ObservableObject {
         }
     }
 
-    private func stopAndSave() {
+    private func stopAndSave() { evaluateRecording(manualStop: true) }
+
+    private func evaluateRecording(manualStop: Bool = false) {
+        guard activeTest != nil else { return }
+        let now = CACurrentMediaTime()
+        recordingElapsed = max(0, now - recordingStart)
+        switch CalibrationCapture.evaluate(samples, start: recordingStart, now: now, manualStop: manualStop) {
+        case .collecting:
+            recordingStatus = recordingElapsed < CalibrationCapture.minimumDuration
+                ? "Hold one comfortable Aa. Small fluctuations are okay."
+                : "Still listening for a steady center. Keep singing comfortably; up to eight seconds."
+        case .accepted(let sample):
+            finishRecording(sample: sample, rejection: nil, recordingEnd: now)
+        case .rejected(let message):
+            finishRecording(sample: nil, rejection: message, recordingEnd: now)
+        }
+    }
+
+    private func finishRecording(sample: CalibrationSample?, rejection: String?, recordingEnd: Double) {
         guard let test = activeTest else { return }
-        let recordingEnd = CACurrentMediaTime()
         recordingTimer?.invalidate()
         recordingTimer = nil
         engine.stop()
         activeTest = nil
         liveFrequency = nil
         level = 0
-
+        recordingStatus = ""
+        measuredFrames[test] = samples
+        measuredDurations[test] = recordingEnd - recordingStart
+        guard let sample = sample else {
+            errorMessage = rejection ?? "No reliable calibration sample was measured. Please retry."
+            NSLog("Calibration rejected after %.2f s: %@", recordingEnd - recordingStart, errorMessage!)
+            saveAudit(status: errorMessage!)
+            return
+        }
         do {
-            measuredFrames[test] = samples
-            let sample = try CalibrationAnalyzer.summarize(samples, recordingStart: recordingStart,
-                                                           recordingEnd: recordingEnd)
             summaries[test] = sample
-            measuredFrames[test] = samples
             results[test] = sample.medianHz
             errorMessage = nil
             if let low = summaries[.low], let middle = summaries[.comfortable], let high = summaries[.high] {
@@ -185,10 +214,11 @@ final class ScaleViewModel: ObservableObject {
                 calibration.propose(proposal)
                 sa = proposal.saHz
             }
-            NSLog("Calibration sample %@: %.3f Hz, %.0f%% reliable coverage", test.title, sample.medianHz, 100 * sample.coverage)
+            NSLog("Calibration sample %@ after %.2f s: %.3f Hz, %.0f%% reliable coverage", test.title,
+                  recordingEnd - recordingStart, sample.medianHz, 100 * sample.coverage)
         } catch {
             errorMessage = error.localizedDescription
-            NSLog("Calibration rejected: %@", error.localizedDescription)
+            NSLog("Calibration recommendation rejected: %@", error.localizedDescription)
         }
         saveAudit(status: errorMessage ?? "Measured sample accepted")
     }
@@ -205,6 +235,8 @@ final class ScaleViewModel: ObservableObject {
         activeTest = nil
         liveFrequency = nil
         level = 0
+        recordingStatus = ""
+        recordingElapsed = 0
     }
 
     func activate() { screenActive = true }
@@ -221,7 +253,7 @@ final class ScaleViewModel: ObservableObject {
                 guard let self = self, self.screenActive, self.permissionGeneration == generation else { return }
                 self.isReferencePlaying = false
                 self.calibration.referenceFinished(hz: frequency, successful: completed)
-                if !completed { self.errorMessage = "Reference playback was interrupted. Listen again before confirming." }
+                if !completed { NSLog("Optional Sa reference playback stopped before completion") }
             }
         } catch {
             isReferencePlaying = false
@@ -229,11 +261,18 @@ final class ScaleViewModel: ObservableObject {
         }
     }
 
+    func stopReference() {
+        reference.stop()
+        isReferencePlaying = false
+    }
+
     func confirmSa() {
+        guard canConfirm else { return }
+        stopReference()
         do {
             try calibration.confirm()
             errorMessage = nil
-            saveAudit(status: "Sa explicitly confirmed after reference playback")
+            saveAudit(status: "Sa explicitly confirmed by singer; reference playback optional")
         } catch { errorMessage = error.localizedDescription }
     }
 
@@ -262,6 +301,7 @@ final class ScaleViewModel: ObservableObject {
             let status: String
             let observations: [String: [CalibrationObservation]]
             let samples: [String: CalibrationSample]
+            let recordingDurations: [String: Double]
             let recommendation: SaRecommendation?
             let confirmedSa: Double?
         }
@@ -271,7 +311,8 @@ final class ScaleViewModel: ObservableObject {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let rows = Dictionary(uniqueKeysWithValues: measuredFrames.map { ($0.key.title, $0.value) })
             let stats = Dictionary(uniqueKeysWithValues: summaries.map { ($0.key.title, $0.value) })
-            let audit = Audit(created: Date(), status: status, observations: rows, samples: stats,
+            let durations = Dictionary(uniqueKeysWithValues: measuredDurations.map { ($0.key.title, $0.value) })
+            let audit = Audit(created: Date(), status: status, observations: rows, samples: stats, recordingDurations: durations,
                               recommendation: recommendation, confirmedSa: calibration.confirmedSa)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

@@ -28,6 +28,8 @@ struct NoteResult: Identifiable, Codable {
     let expectedFrames: Int
     let voicedFrames: Int
     let correctFrames: Int
+    let transitionAcceptedFrames: Int
+    let practiceMatchPercent: Double
     var id: Int { index }
 }
 
@@ -39,6 +41,8 @@ struct PracticeSummary: Codable {
     let avgAbsCents: Double?
     let accuracyPercent: Double
     let reliableCoveragePercent: Double
+    let practiceMatchPercent: Double
+    let transitionWindowSeconds: Double
     let limitations: [String]
 }
 
@@ -86,6 +90,27 @@ struct PracticeTimeline: Codable {
         }
     }
 
+    var transitionWindowSeconds: Double { min(0.1, 0.2 * 60 / bpm) }
+
+    /// Additional practice metric; strict accuracy remains separately reported.
+    func matchesForPractice(_ observation: PracticeObservation,
+                            thresholds: AccuracyThresholds = AccuracyThresholds()) -> Bool {
+        guard observation.isReliable, let hz = observation.frequency,
+              let note = note(at: observation.time) else { return false }
+        if abs(PitchMath.cents(detected: hz, expected: note.target.frequency)) <= thresholds.onTargetCents + 1e-9 { return true }
+        // Explicit timing allowance, not a wider sustained-note pitch threshold.
+        // Only the adjacent notes and the glide between them qualify. Missing
+        // voice and unrelated pitches still earn zero; no time is excluded.
+        for index in 1..<notes.count {
+            guard abs(observation.time - notes[index].start) <= transitionWindowSeconds else { continue }
+            let first = notes[index - 1].target.frequency, second = notes[index].target.frequency
+            let low = min(first, second), high = max(first, second)
+            if PitchMath.cents(detected: hz, expected: low) >= -thresholds.onTargetCents - 1e-9 &&
+                PitchMath.cents(detected: hz, expected: high) <= thresholds.onTargetCents + 1e-9 { return true }
+        }
+        return false
+    }
+
     func note(at elapsed: Double) -> TimedPracticeNote? {
         guard elapsed.isFinite && elapsed >= 0 && elapsed < duration else { return nil }
         let index = min(Int(elapsed * bpm / 60), notes.count - 1)
@@ -122,6 +147,7 @@ struct PracticeTimeline: Codable {
             let errors = voiced.map { PitchMath.cents(detected: $0.frequency!, expected: note.target.frequency) }
             let correct = errors.filter { abs($0) <= thresholds.onTargetCents + 1e-9 }.count
             if !errors.isEmpty && Double(errors.filter { abs($0) > thresholds.onTargetCents }.count) / Double(errors.count) >= 0.1 { mismatch = true }
+            let practiceMatches = voiced.filter { matchesForPractice($0, thresholds: thresholds) }.count
             let detected = PitchMath.median(voiced.compactMap { $0.frequency })
             let voicedDuration = duration * (Double(voiced.count) / Double(count))
             let correctDuration = duration * (Double(correct) / Double(count))
@@ -134,7 +160,9 @@ struct PracticeTimeline: Codable {
                               missingDuration: duration - voicedDuration,
                               medianAbsoluteCents: PitchMath.median(errors.map { abs($0) }),
                               accuracyPercent: 100 * Double(correct) / Double(count),
-                              expectedFrames: count, voicedFrames: voiced.count, correctFrames: correct)
+                              expectedFrames: count, voicedFrames: voiced.count, correctFrames: correct,
+                              transitionAcceptedFrames: practiceMatches - correct,
+                              practiceMatchPercent: 100 * Double(practiceMatches) / Double(count))
         }
         let totalEligible = results.reduce(0) { $0 + $1.eligibleDuration }
         let totalVoiced = results.reduce(0) { $0 + $1.voicedDuration }
@@ -146,6 +174,7 @@ struct PracticeTimeline: Codable {
             "Illustrative Shuddha ratios; experimental 25/50-cent thresholds are not a validated Hindustani assessment.",
             "The percentage is singing pitch-match coverage for the full expected exercise, not detector confidence."
         ]
+        limitations.append("Practice match allows adjacent-note pitches and glides within 100 ms either side of internal changes. Strict timed match is retained separately. Silence and wrong octaves still reduce both scores; sustained-note tolerance stays ±50 cents.")
         if totalVoiced < 0.8 * totalEligible { limitations.append("Incomplete reliable voice coverage: silence, rejected pitch or dropped acquisition decreases the score.") }
         if mismatch { limitations.append("Pitch or timing mismatch detected; alignment confidence is limited.") }
         return (PracticeSummary(total: notes.count, attempted: attempted, onTarget: onTarget,
@@ -153,6 +182,8 @@ struct PracticeTimeline: Codable {
                                 avgAbsCents: absolute.isEmpty ? nil : absolute.reduce(0, +) / Double(absolute.count),
                                 accuracyPercent: results.reduce(0) { $0 + $1.accuracyPercent } / Double(notes.count),
                                 reliableCoveragePercent: totalEligible > 0 ? 100 * totalVoiced / totalEligible : 0,
+                                practiceMatchPercent: results.reduce(0) { $0 + $1.practiceMatchPercent } / Double(notes.count),
+                                transitionWindowSeconds: transitionWindowSeconds,
                                 limitations: limitations), results)
     }
 }

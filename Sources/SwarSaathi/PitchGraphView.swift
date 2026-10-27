@@ -1,7 +1,7 @@
 import SwiftUI
 import QuartzCore
 
-/// Scrolling pitch graph. Y axis is a log-frequency (musical) scale with a lane for each swar.
+/// Whole-exercise preview with a left-to-right playhead. Y is log-frequency.
 /// Purple = target note (with tolerance band), blue = your voice.
 struct PitchGraphView: View {
     let points: [GraphPoint]
@@ -11,7 +11,7 @@ struct PitchGraphView: View {
     let active: Bool
     var timeline: PracticeTimeline? = nil
     var sessionStart: Double? = nil
-    var window: Double = 8   // seconds shown
+    var window: Double = 8   // fallback span when no timeline is supplied
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !active)) { _ in
@@ -27,15 +27,18 @@ struct PitchGraphView: View {
         guard let lowest = ladder.first?.hz else { return }
         let yMin = lowest * pow(2, -150.0 / 1200)
         let span = 1500.0   // one octave + 150 cents padding above and below
-        let plot = CGRect(x: 58, y: 8, width: size.width - 66, height: size.height - 28)
+        let plot = CGRect(x: 58, y: 8, width: max(1, size.width - 66), height: max(1, size.height - 28))
+        let duration = max(0.001, timeline?.duration ?? window)
 
         func yPos(_ hz: Double) -> CGFloat {
             let c = 1200 * log2(max(hz, 1) / yMin)
             let f = min(max(c / span, -0.05), 1.05)
             return plot.maxY - CGFloat(f) * plot.height
         }
-        func xPos(_ t: Double) -> CGFloat {
-            plot.maxX - CGFloat((now - t) / window) * plot.width
+        // Every layer uses the same fixed 0...duration axis. The complete
+        // expected phrase is visible before microphone capture/count-in.
+        func xPos(_ elapsed: Double) -> CGFloat {
+            plot.minX + CGFloat(elapsed / duration) * plot.width
         }
 
         // Swar lanes + labels
@@ -70,13 +73,16 @@ struct PitchGraphView: View {
             data.stroke(line, with: .color(.swarPurple), style: StrokeStyle(lineWidth: 2.5))
         }
 
-        if let timeline = timeline, let start = sessionStart {
+        if let timeline = timeline {
             // Expected segments come from the clocked score even in silence.
             // No target point is inferred from a microphone observation.
             for note in timeline.notes {
-                let x0 = xPos(start + note.start), x1 = xPos(start + note.end)
+                let x0 = xPos(note.start), x1 = xPos(note.end)
                 if x1 >= plot.minX && x0 <= plot.maxX {
                     drawTarget(note.target.frequency, from: max(plot.minX, x0), to: min(plot.maxX, x1))
+                    data.draw(Text(note.target.label).font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(.swarPurple),
+                              at: CGPoint(x: (x0 + x1) / 2, y: yPos(note.target.frequency) - 14))
                 }
             }
         } else {
@@ -87,25 +93,38 @@ struct PitchGraphView: View {
         var path = Path()
         var prev: GraphPoint?
         for p in points {
-            guard let hz = p.hz else { prev = nil; continue }
-            let pt = CGPoint(x: xPos(p.t), y: yPos(hz))
+            guard let start = sessionStart, let hz = p.hz,
+                  p.t >= start, p.t <= start + duration else { prev = nil; continue }
+            let pt = CGPoint(x: xPos(p.t - start), y: yPos(hz))
             if let pr = prev, p.t - pr.t < 0.25 { path.addLine(to: pt) } else { path.move(to: pt) }
             prev = p
         }
         data.stroke(path, with: .color(.swarBlue),
                     style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
 
-        if let last = points.last, let hz = last.hz, now - last.t < 0.4 {
+        if let start = sessionStart, let last = points.last, let hz = last.hz, now - last.t < 0.4 {
             let color = thresholds.classify(PitchMath.cents(detected: hz, expected: last.targetHz)).color
-            let c = CGPoint(x: xPos(last.t), y: yPos(hz))
+            let c = CGPoint(x: xPos(last.t - start), y: yPos(hz))
             data.fill(Path(ellipseIn: CGRect(x: c.x - 7, y: c.y - 7, width: 14, height: 14)), with: .color(.white))
             data.fill(Path(ellipseIn: CGRect(x: c.x - 5, y: c.y - 5, width: 10, height: 10)), with: .color(color))
         }
 
-        // Time axis labels
-        context.draw(Text("\(Int(window)) s ago").font(.system(size: 9)).foregroundColor(.gray),
+        // Clock progress moves; targets remain fixed. During count-in it stays
+        // at zero, and after completion the whole phrase remains available.
+        if let start = sessionStart {
+            let elapsed = min(duration, max(0, now - start))
+            let x = xPos(elapsed)
+            var playhead = Path()
+            playhead.move(to: CGPoint(x: x, y: plot.minY))
+            playhead.addLine(to: CGPoint(x: x, y: plot.maxY))
+            context.stroke(playhead, with: .color(.primary.opacity(0.55)),
+                           style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+        }
+
+        // Fixed time axis labels
+        context.draw(Text("0 s").font(.system(size: 9)).foregroundColor(.gray),
                      at: CGPoint(x: plot.minX, y: size.height - 2), anchor: .bottomLeading)
-        context.draw(Text("now").font(.system(size: 9)).foregroundColor(.gray),
+        context.draw(Text(String(format: "%.1f s", duration)).font(.system(size: 9)).foregroundColor(.gray),
                      at: CGPoint(x: plot.maxX, y: size.height - 2), anchor: .bottomTrailing)
         context.draw(Text("Time →").font(.system(size: 9)).foregroundColor(.gray),
                      at: CGPoint(x: plot.midX, y: size.height - 2), anchor: .bottom)

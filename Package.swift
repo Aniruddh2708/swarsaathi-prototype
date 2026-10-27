@@ -10,7 +10,7 @@ let package = Package(
                 exclude: ["SwarSaathiApp.swift", "PitchEngine.swift", "ScaleViewModel.swift",
                           "ScaleDiscoveryView.swift", "PracticeViewModel.swift", "PracticeView.swift",
                           "PitchGraphView.swift", "SummaryView.swift", "Theme.swift", "ReferenceAudio.swift"],
-                sources: ["MusicTheory.swift", "PitchDetector.swift", "Calibration.swift", "PracticeTimeline.swift", "AudioPipeline.swift", "AudioProcessingRun.swift"]),
+                sources: ["MusicTheory.swift", "PitchDetector.swift", "Calibration.swift", "PracticeTimeline.swift", "AudioPipeline.swift", "AudioProcessingRun.swift", "CalibrationCapture.swift"]),
         .testTarget(name: "SwarSaathiCoreTests", dependencies: ["SwarSaathiCore"], path: "Tests/SwarSaathiCoreTests")
     ],
     swiftLanguageVersions: [.v5]

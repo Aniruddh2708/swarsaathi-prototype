@@ -70,7 +70,7 @@ struct PracticeView: View {
             .disabled(vm.phase == .running || vm.referencePlaying || vm.isStarting)
             Stepper("Tempo: \(Int(vm.bpm)) BPM", value: $vm.bpm, in: 40...120, step: 4)
                 .disabled(vm.phase == .running || vm.referencePlaying || vm.isStarting)
-            Text("Illustrative Shuddha ratios. Listen to the full reference, then sing once after the three-beat count-in. Targets follow the clock even when a note is wrong or missing.")
+            Text("Illustrative Shuddha ratios. Reference playback is optional. Start when ready and sing after the three-beat count-in. Targets follow the clock through mistakes and silence.")
                 .font(.footnote).foregroundColor(.secondary)
             if vm.exercises.isEmpty {
                 Text("No exercise fits the measured comfortable range. Return to calibration.")
@@ -179,7 +179,7 @@ struct PracticeView: View {
                     .buttonStyle(PrimaryButtonStyle())
             } else if vm.phase == .idle {
                 Button { vm.referencePlaying ? vm.stopReference() : vm.playReference() } label: {
-                    Label(vm.referencePlaying ? "Stop reference" : "Play reference Alankaar", systemImage: vm.referencePlaying ? "stop.fill" : "play.fill")
+                    Label(vm.referencePlaying ? "Stop reference" : "Play reference Alankaar (optional)", systemImage: vm.referencePlaying ? "stop.fill" : "play.fill")
                 }
                 .buttonStyle(PrimaryButtonStyle(filled: false))
                 .disabled(vm.isStarting || vm.exercises.isEmpty)
@@ -217,15 +217,15 @@ struct NoteCardView: View {
 
     private var accuracy: Accuracy? {
         guard let result = result else { return nil }
-        if result.accuracyPercent < 80 { return .needsAdjustment }
-        return result.signedCents.map { thresholds.classify($0) }
+        if result.practiceMatchPercent < 80 { return .needsAdjustment }
+        return .onTarget
     }
 
     private var icon: String {
         if isCurrent { return "waveform" }
         guard let r = result else { return "circle" }
         if r.detectedHz == nil { return "minus.circle" }
-        return r.accuracyPercent < 80 ? "exclamationmark.circle.fill" : "checkmark.circle.fill"
+        return r.practiceMatchPercent < 80 ? "exclamationmark.circle.fill" : "checkmark.circle.fill"
     }
 
     var body: some View {
@@ -235,7 +235,7 @@ struct NoteCardView: View {
                 .font(.caption2)
                 .foregroundColor(.secondary)
             if let result = result {
-                Text(String(format: "%.0f%% match", result.accuracyPercent))
+                Text(String(format: "%.0f%% match", result.practiceMatchPercent))
                     .font(.caption2)
             }
             Image(systemName: icon)

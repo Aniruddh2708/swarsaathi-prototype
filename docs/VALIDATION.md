@@ -111,3 +111,40 @@ Core Audio exception. Hardware/Simulator regression remains pending: start on
 built-in input, connect/disconnect AirPods during capture, verify clean stop and
 retry without a crash or stale-rate observations. Repeat on the actual evaluation
 iPad/iPhone. Check macOS microphone permission for Xcode/Simulator separately.
+
+## Patient calibration and practice usability follow-up
+
+Reference playback is now optional at the user's request; measured Sa still
+requires explicit confirmation. First and repeated practice starts use the same
+range/permission guards, and playback stops before capture. Regression tests
+first reproduced the old confirmation gate before the correction. Calibration
+now attempts full-recording validation after 3.2 seconds, continues collecting
+on instability/insufficient voice until 8 seconds, and then reports rejection if
+still inconclusive. It does not choose only successful frames. Coverage, pitch
+confidence and held-vowel spread requirements are unchanged.
+
+The complete target phrase is visible before count-in on a fixed left-to-right
+axis; a moving playhead indicates elapsed time. Target timing remains independent
+of the microphone. Visual interaction still requires on-device inspection.
+
+The original strict timed score remains `accuracyPercent`. New schema version 2
+reports also contain `practiceMatchPercent`, `transitionWindowSeconds`, and each
+note's `transitionAcceptedFrames`. In the practice metric only, a reliable pitch
+between adjacent targets (including their existing ±50-cent bands) can earn
+credit within 100 ms either side of an internal boundary. This does not shift the
+entire recording or remove any time cells. Silence, poor-confidence voice and
+wrong octaves remain zero; held-note pitch tolerance is unchanged. It is a
+transparent training allowance, not a validated clinical/musical accuracy metric.
+
+A new deterministic regression reproduced the strict-only behaviour for an
+80 ms delayed internal note change: 93.6% rather than the desired transition-aware
+100%. The strict 93.6% is preserved alongside the new practice result. Tests also
+cover silence at boundaries, a wrong octave, errors beyond the window, unchanged
+full denominator, and normal ±40-cent vibrato. No numerical threshold was tuned
+to force a particular singer's report to pass.
+
+`sh scripts/replay_report.sh path/to/practice.json` uses the production scorer on
+an existing local audit. The user-provided report was replayed locally, without
+publishing its observations or treating its pitch estimates as ground-truth audio.
+A practice JSON cannot establish why a different calibration recording failed or
+prove actual acoustic F0 accuracy; that requires the calibration report/audio.

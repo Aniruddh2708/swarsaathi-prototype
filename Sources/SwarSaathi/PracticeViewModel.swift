@@ -18,7 +18,7 @@ final class PracticeViewModel: ObservableObject {
     @Published private(set) var currentIndex = 0
     @Published private(set) var detectedHz: Double?
     @Published private(set) var cents: Double?
-    @Published private(set) var feedback = "Listen to the full reference, then start the guided practice."
+    @Published private(set) var feedback = "Start when ready, or listen to the optional reference first."
     @Published private(set) var feedbackKind: FeedbackKind = .neutral
     // Source-compatible name; now guided note progress, never a success gate.
     @Published private(set) var holdProgress: Double = 0
@@ -67,7 +67,7 @@ final class PracticeViewModel: ObservableObject {
             .map { LadderLine(name: $0.label, hz: $0.frequency) }.sorted { $0.hz < $1.hz }
     }
     var summary: PracticeSummary { timeline.score(observations: observations, thresholds: thresholds).summary }
-    var canStart: Bool { referenceComplete && !referencePlaying && !isStarting && !exercises.isEmpty && phase != .running }
+    var canStart: Bool { !isStarting && !exercises.isEmpty && phase == .idle && targetsFitRange() }
 
     private func configurationChanged() {
         guard phase != .running else { return }
@@ -76,10 +76,9 @@ final class PracticeViewModel: ObservableObject {
         referenceComplete = false
         guard exercises.indices.contains(selectedExerciseIndex) else { return }
         targets = exercises[selectedExerciseIndex].targets(sa: sa, tuning: .justShuddha)
-        results = Array(repeating: nil, count: targets.count)
-        currentIndex = 0
+        resetSession()
         phase = .idle
-        feedback = "Listen to the selected reference before practice."
+        feedback = "Ready to start. Reference playback is optional."
     }
 
     func playReference() {
@@ -97,7 +96,7 @@ final class PracticeViewModel: ObservableObject {
                 guard let self = self else { return }
                 self.referencePlaying = false
                 self.referenceComplete = completed
-                self.feedback = completed ? "Reference complete. Start when ready for the three-beat count-in." : "Reference interrupted. Replay the full reference."
+                self.feedback = completed ? "Reference complete. Start when ready for the three-beat count-in." : "Reference stopped. Start when ready, or listen again."
             }
         } catch {
             referencePlaying = false
@@ -120,9 +119,12 @@ final class PracticeViewModel: ObservableObject {
 
     func start() {
         guard canStart && targetsFitRange() else {
-            errorMessage = "Listen to the complete reference for an available exercise before starting."
+            errorMessage = "Select an exercise that fits your confirmed Sa before starting."
             return
         }
+        // Starting is an explicit choice; optional playback ends before permission/capture.
+        reference.stop()
+        referencePlaying = false
         requestGeneration += 1
         let generation = requestGeneration
         errorMessage = nil
@@ -236,9 +238,10 @@ final class PracticeViewModel: ObservableObject {
 
     func prepareAgain() {
         shutdown()
+        resetSession()
         phase = .idle
         referenceComplete = false
-        feedback = "Listen to the reference again before the next attempt."
+        feedback = "Ready for another attempt. Start now or listen to the optional reference."
     }
 
     func shutdown() {
@@ -260,7 +263,7 @@ final class PracticeViewModel: ObservableObject {
         guard phase == .running else { return }
         switch status {
         case .interrupted: finish(incomplete: true, reason: "Audio interrupted. Restart rather than resume an uncertain timeline.")
-        case .resumed: finish(incomplete: true, reason: "Audio route restarted. Replay the reference and begin a fresh attempt.")
+        case .resumed: finish(incomplete: true, reason: "Audio route restarted. Begin a fresh attempt when ready.")
         case .failed(let message): finish(incomplete: true, reason: message)
         }
     }
@@ -276,7 +279,7 @@ final class PracticeViewModel: ObservableObject {
         // Smoothed display is independent of scoring and never bridges unvoiced data.
         let visible = observation.isReliable ? frame.frequency : nil
         graphPoints.append(GraphPoint(t: frame.time, hz: visible, targetHz: note.target.frequency))
-        if let first = graphPoints.first, frame.time - first.t > 16 { graphPoints.removeAll { frame.time - $0.t > 16 } }
+        // Keep the complete fixed exercise trace (at most 24 seconds).
         guard observation.isReliable, let f = raw else {
             detectedHz = nil; cents = nil
             feedback = "No reliable voice. The guided target continues."
@@ -291,8 +294,13 @@ final class PracticeViewModel: ObservableObject {
         case .veryAccurate: feedback = "Very accurate. Follow the guided tempo."; feedbackKind = .perfect
         case .onTarget: feedback = "On target. Follow the guided tempo."; feedbackKind = .onTarget
         case .needsAdjustment:
-            feedback = abs(error) > 100 ? "Different note or octave; check the current target." : (error > 0 ? "Slightly high" : "Slightly low")
-            feedbackKind = error > 0 ? .high : .low
+            if timeline.matchesForPractice(observation, thresholds: thresholds) {
+                feedback = "Changing note—keep going."
+                feedbackKind = .neutral
+            } else {
+                feedback = abs(error) > 100 ? "Follow the next target—keep singing." : (error > 0 ? "Slightly high—keep going" : "Slightly low—keep going")
+                feedbackKind = error > 0 ? .high : .low
+            }
         }
     }
 
@@ -316,7 +324,7 @@ final class PracticeViewModel: ObservableObject {
             let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("SwarSaathiReports", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let scored = timeline.score(observations: observations, thresholds: thresholds)
-            let audit = Audit(schemaVersion: 1, createdUTC: ISO8601DateFormatter().string(from: Date()), source: "AVAudioEngine microphone raw YIN observations", saHz: sa, timeline: timeline,
+            let audit = Audit(schemaVersion: 2, createdUTC: ISO8601DateFormatter().string(from: Date()), source: "AVAudioEngine microphone raw YIN observations", saHz: sa, timeline: timeline,
                               observations: observations, thresholds: thresholds, summary: scored.summary, results: scored.results,
                               capture: engine.diagnostics,
                               incomplete: incomplete, reason: incompleteReason)

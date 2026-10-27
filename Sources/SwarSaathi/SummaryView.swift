@@ -25,18 +25,23 @@ struct SummaryView: View {
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 tile("Notes attempted", "\(summary.attempted) of \(summary.total)")
-                tile("Sung on target", "\(summary.onTarget)")
-                tile("Need improvement", "\(summary.needsImprovement)")
+                tile("Strict match ≥80%", "\(summary.onTarget)")
+                tile("Strict match <80%", "\(summary.needsImprovement)")
                 tile("Voice coverage", String(format: "%.0f%%", summary.reliableCoveragePercent))
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Overall pitch accuracy").font(.subheadline).foregroundColor(.secondary)
-                Text(String(format: "%.0f%%", summary.accuracyPercent))
+                Text("Practice pitch match").font(.subheadline).foregroundColor(.secondary)
+                Text(String(format: "%.0f%%", summary.practiceMatchPercent))
                     .font(.system(size: 44, weight: .bold, design: .rounded))
                     .foregroundStyle(LinearGradient(colors: [.swarBlue, .swarPurple],
                                                     startPoint: .leading, endPoint: .trailing))
             }
+
+            Text(String(format: "Strict timed match: %.0f%% · reliable voice: %.0f%%", summary.accuracyPercent, summary.reliableCoveragePercent))
+                .font(.subheadline)
+            Text("Practice match allows 0.10 seconds around note changes. Normal pitch variation within ±50 cents is accepted. Silence still counts as missing. These percentages are practice feedback, not a pass/fail judgement of your singing.")
+                .font(.footnote).foregroundColor(.secondary)
 
             Text("Target vs. what you sang")
                 .font(.headline)
@@ -73,8 +78,10 @@ struct SummaryView: View {
 
             ForEach(results.compactMap { $0 }) { result in
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("\(result.index + 1). \(result.swar) · \(String(format: "%.1f%%", result.accuracyPercent)) pitch match")
+                    Text("\(result.index + 1). \(result.swar) · \(String(format: "%.1f%%", result.practiceMatchPercent)) practice match")
                         .font(.subheadline.bold())
+                    Text(String(format: "Strict timed match: %.1f%% · transition allowance: %d cells", result.accuracyPercent, result.transitionAcceptedFrames))
+                        .font(.caption).foregroundColor(.secondary)
                     Text("Correct \(result.correctFrames)/\(result.expectedFrames) cells · voiced \(result.voicedFrames)/\(result.expectedFrames) · missing \(String(format: "%.2f", result.missingDuration)) s")
                         .font(.caption).foregroundColor(.secondary)
                     Text(result.medianAbsoluteCents.map { String(format: "Median absolute error: %.1f cents", $0) } ?? "No reliable voice measured")

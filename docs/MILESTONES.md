@@ -13,3 +13,22 @@ The target demonstration is October 29. The original Swift app architecture and 
 The reviewed complete release run passed **57 XCTest tests with zero failures** in 0.846 seconds. It includes two synthetic signal-to-worker-to-score integration tests. Commands, exact measurements and additional reproduced calibration/summary failures are in [VALIDATION.md](VALIDATION.md). Preserve failed-test evidence, its root cause, the minimal correction, the regression rerun and earlier passing tests for each future failure. Do not present an unexecuted Apple or hardware stage as passed.
 
 The previous Python/browser source is replaced in the repository at the user's request. It remains recoverable in prior Git history; it is not mixed into the new Swift app.
+
+## Usability follow-up after device feedback
+
+Changed calibration capture policy/view model and controls, confirmation state,
+practice restart/reference controls, graph, scorer/summary, and regression tests.
+Calibration now keeps collecting inconclusive input until an eight-second limit;
+reference playback is optional; the entire target sequence is visible upfront.
+Practice match adds a disclosed 100 ms transition allowance alongside unchanged
+strict timed match and full missing-voice denominator.
+
+Reproduced the early calibration rejection and mandatory playback confirmation
+in failing regressions, then applied the minimal policy changes. Reproduced
+strict-only treatment of small transitions before adding the separate metric.
+`sh scripts/test.sh` passed **67 tests, zero failures** in 0.957 s; see
+[evidence](evidence/usability-release.log). Swift source syntax and Xcode project
+source membership checks passed. A local audit replayer uses the production
+scorer without changing observations. The supplied report is not published.
+Actual button tapping, graph readability and patient capture still require a
+fresh on-device trial; an Apple CI build does not substitute for those checks.
