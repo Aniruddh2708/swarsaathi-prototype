@@ -1,0 +1,53 @@
+{
+  "source": "GitHub public check-job step metadata; detailed runner logs not retrieved",
+  "url": "https://github.com/Aniruddh2708/swarsaathi-prototype/actions/runs/40476104346/job/122094603748",
+  "commit": "a585f7b5899e534f4b2e5898b08f929798ca55ed",
+  "runner": "macos-15",
+  "observedUTC": "2026-10-27T08:52:04.617779+00:00",
+  "steps": [
+    {
+      "name": "Set up job",
+      "conclusion": "success",
+      "started-at": "2026-10-27T08:48:38Z",
+      "completed-at": "2026-10-27T08:48:38Z"
+    },
+    {
+      "name": "Run actions/checkout@v4",
+      "conclusion": "success",
+      "started-at": "2026-10-27T08:48:38Z",
+      "completed-at": "2026-10-27T08:48:40Z"
+    },
+    {
+      "name": "Toolchain",
+      "conclusion": "success",
+      "started-at": "2026-10-27T08:48:40Z",
+      "completed-at": "2026-10-27T08:48:44Z"
+    },
+    {
+      "name": "Core regression tests (Apple Accelerate path)",
+      "conclusion": "success",
+      "started-at": "2026-10-27T08:48:44Z",
+      "completed-at": "2026-10-27T08:49:37Z"
+    },
+    {
+      "name": "Build iOS app for simulator",
+      "conclusion": "success",
+      "started-at": "2026-10-27T08:49:37Z",
+      "completed-at": "2026-10-27T08:50:18Z"
+    },
+    {
+      "name": "Post Run actions/checkout@v4",
+      "conclusion": "success",
+      "started-at": "2026-10-27T08:50:18Z",
+      "completed-at": "2026-10-27T08:50:20Z"
+    },
+    {
+      "name": "Complete job",
+      "conclusion": "success",
+      "started-at": "2026-10-27T08:50:20Z",
+      "completed-at": "2026-10-27T08:50:21Z"
+    }
+  ],
+  "hardwareValidationExecuted": false,
+  "appleTestCountVerifiedFromLog": null
+}

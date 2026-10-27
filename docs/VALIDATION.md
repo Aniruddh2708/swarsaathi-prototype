@@ -1,6 +1,6 @@
 # Validation evidence and Apple-device gate
 
-Updated October 27, 2026. All cloud measurements below use synthetic inputs on Linux x86_64. Xcode, Apple Accelerate execution, AVAudioEngine on a device and real singing have **not** been validated here.
+Updated October 27, 2026. Numerical measurements below use synthetic inputs on Linux x86_64. The macOS CI core-test step (Apple Accelerate) and Xcode iOS simulator build subsequently passed. AVAudioEngine on a physical device and real singing remain **unvalidated**.
 
 ## Reproduced baseline
 
@@ -59,6 +59,16 @@ Use `sh scripts/test.sh` for the repository's repeatable Mac/Linux core check. O
 
 The final combined test count and exact benchmark timing are in the [final release log](evidence/final-release.log); reruns can vary in timing. XCTest's executed test count is authoritative; the trailing Swift Testing message may say zero tests because this project uses XCTest. The Linux installer was also executed into a fresh directory, verifying the downloaded detached signature before extraction; the retained-toolchain rerun succeeded.
 
+## Executed Apple CI gate
+
+For commit `a585f7b5899e534f4b2e5898b08f929798ca55ed`, [GitHub run 40476104346](https://github.com/Aniruddh2708/swarsaathi-prototype/actions/runs/40476104346/job/122094603748) on `macos-15` reported:
+
+- `swift test --configuration release --jobs 2`: success; this compiles and executes the Apple Accelerate path.
+- `xcodebuild -project SwarSaathi.xcodeproj -scheme SwarSaathi -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO build`: success.
+- Job completed successfully at 08:50:21 UTC on October 27, 2026.
+
+The public job step metadata is preserved in [apple-ci.json](evidence/apple-ci.json). Detailed runner logs were unavailable anonymously, so no additional Apple test count, numerical error or latency measurement is inferred. These are executed CI results, separate from the 57-test Linux log. This unsigned simulator build does not establish signed deployment, microphone capture or singing accuracy on the actual device.
+
 ## Device and recorded-singing validation — pending
 
 Complete this stage on the exact iPad/iPhone and microphone route to be used on October 29. Simulator or static inspection cannot satisfy it.
@@ -75,8 +85,8 @@ Raw PCM recording/file-import analysis is not silently provided by the live obse
 
 ## Remaining risks
 
-- The native project and Apple-only APIs need an actual Xcode build. The macOS workflow supplies a gate, but workflow creation is not a passing run.
-- Portable tests exercise the shared algorithm; Apple Accelerate rounding and AVAudioEngine timing/route behavior need separate validation.
+- The native project passed its Xcode simulator build. Signed installation and actual microphone capture/playback still need the evaluation device.
+- Portable tests measure the shared algorithm, and the Apple Accelerate test step passed in CI. Detailed Apple numerical measurements and AVAudioEngine timing/route behavior still require validation.
 - The mailbox is bounded and uses brief locks. Callback scheduling, device CPU pressure and audio-buffer sizing still need profiling. Dropped audio conservatively lowers coverage; it must not be concealed.
 - Three sustained vowels only provide rough comfortable-span evidence. Safety margins, coverage gates and the illustrative tuning remain prototype assumptions requiring evaluator review.
 - Display smoothing can lag true octave changes. Scoring and calibration use raw accepted YIN observations, so display appearance must not be presented as a detector measurement.

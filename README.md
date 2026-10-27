@@ -2,7 +2,7 @@
 
 This repository uses the uploaded Swift/SwiftUI implementation as its codebase. The original AVAudioEngine/YIN design, SwiftUI appearance, illustrative Shuddha ratios and 25/50-cent feedback thresholds are retained. The previous Python and browser implementations are superseded.
 
-The feasibility demonstration is due **October 29, 2026**. Executable core regression tests run in the cloud. **The iOS build, Apple Accelerate execution and real-device singing/latency validation still require Apple-side execution.** Synthetic tests do not establish microphone accuracy.
+The feasibility demonstration is due **October 29, 2026**. **57 Linux core tests passed. The [macOS CI run](https://github.com/Aniruddh2708/swarsaathi-prototype/actions/runs/40476104346) also passed the Apple Accelerate core-test step and iOS simulator build for commit `a585f7b`. Real-device singing, microphone routing and latency validation remain pending.** Synthetic tests do not establish microphone accuracy.
 
 ## Run on your iPad or iPhone from your iMac
 
