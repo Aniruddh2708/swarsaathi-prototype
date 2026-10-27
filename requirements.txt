@@ -1,4 +1,0 @@
-numpy==2.2.6
-sounddevice==0.5.3
-PyQt6==6.9.1
-pyqtgraph==0.13.7
