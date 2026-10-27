@@ -59,6 +59,13 @@ final class PitchEngine {
                                         object: nil, queue: .main) { [weak self] _ in
             self?.handleConfigurationChange()
         })
+        observers.append(nc.addObserver(forName: AVAudioSession.routeChangeNotification,
+                                        object: nil, queue: .main) { [weak self] n in
+            guard let raw = n.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+                  let reason = AVAudioSession.RouteChangeReason(rawValue: raw),
+                  reason != .categoryChange else { return }
+            self?.handleConfigurationChange()
+        })
     }
 
     deinit {
@@ -129,7 +136,7 @@ final class PitchEngine {
         guard session.isInputAvailable else { throw PitchEngineError.noInput }
 
         let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
+        let format = input.inputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { throw PitchEngineError.badFormat }
 
         generation &+= 1
@@ -138,7 +145,13 @@ final class PitchEngine {
         activeRun = run
         lastRun = run
         run.start()
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, when in
+        // Let the input node negotiate its native tap format. An explicitly
+        // cached output format can be stale after a Bluetooth/Simulator route
+        // change and installTap raises an NSException (not a Swift Error).
+        input.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, when in
+            // Never interpret a new route's samples using the old YIN rate.
+            // Route/configuration notifications terminate this recording.
+            guard buffer.format.sampleRate == run.sampleRate else { return }
             guard let channels = buffer.floatChannelData else { return }
             let n = Int(buffer.frameLength)
             // AVAudioTime host timestamps and CACurrentMediaTime use the same
@@ -212,9 +225,9 @@ final class PitchEngine {
     private func handleConfigurationChange() {
         // Route change (headphones, Bluetooth) or media services reset.
         guard wantsRunning else { return }
+        wantsRunning = false
         stopEngineOnly()
         onStatus?(.interrupted)
-        if wantsRunning { restart() }
     }
 
     private func restart() {

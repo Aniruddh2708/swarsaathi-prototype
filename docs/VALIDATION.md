@@ -91,3 +91,23 @@ Raw PCM recording/file-import analysis is not silently provided by the live obse
 - Three sustained vowels only provide rough comfortable-span evidence. Safety margins, coverage gates and the illustrative tuning remain prototype assumptions requiring evaluator review.
 - Display smoothing can lag true octave changes. Scoring and calibration use raw accepted YIN observations, so display appearance must not be presented as a detector measurement.
 - Fixed-tempo pitch comparison conflates timing and pitch mistakes. The resulting score is not a validated assessment of full musical performance.
+
+## Reported Simulator route crash — follow-up
+
+The user reported an iPhone 17 Pro Simulator / iOS 26.2 crash after connecting
+AirPods: Core Audio rejected an explicitly supplied mono 44100 Hz Float32 tap
+format. The capture adapter supplied the input node's previously queried output
+format to installTap. Audio-route changes can invalidate that format; the thrown
+Objective-C NSException is not handled by Swift do/catch.
+
+The adapter now asks the input node to negotiate its native tap format (`nil`),
+initializes YIN from the hardware input rate, rejects buffers whose rate differs
+from the recording's rate, and ends capture on route/configuration changes until
+the singer explicitly retries. No detector or scoring threshold changed.
+
+Validation: `sh scripts/test.sh` reran all 57 portable tests successfully; all
+Swift source passed syntax parsing. These checks do not reproduce the Simulator
+Core Audio exception. Hardware/Simulator regression remains pending: start on
+built-in input, connect/disconnect AirPods during capture, verify clean stop and
+retry without a crash or stale-rate observations. Repeat on the actual evaluation
+iPad/iPhone. Check macOS microphone permission for Xcode/Simulator separately.
