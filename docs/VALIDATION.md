@@ -148,3 +148,30 @@ an existing local audit. The user-provided report was replayed locally, without
 publishing its observations or treating its pitch estimates as ground-truth audio.
 A practice JSON cannot establish why a different calibration recording failed or
 prove actual acoustic F0 accuracy; that requires the calibration report/audio.
+
+
+## Independent calibration and percentage checks — October 28
+
+The [clarity milestone](MILESTONES.md) adds eight executed tests, bringing the
+portable suite to **75 tests, zero failures**. See [the full log](evidence/clarity-core.log).
+The synthetic calibration check uses 3.2-second PCM vowels with three harmonics,
+±20-cent / 5 Hz vibrato, deterministic additive noise and a DC offset. Four
+low/middle/high sets at both 44.1 and 48 kHz cover 82.41–620 Hz and include similar
+low/middle pitches. Every sample goes through the production processing worker,
+DC/RMS preprocessing, YIN, and calibration analyzer. Maximum error of the measured
+sample median is 0.671688 cents; all eight tonic choices match known-pitch inputs.
+This measures reproducibility of the existing recommendation policy, not the
+musical validity of a unique personal tonic or accuracy on a singer dataset.
+
+The independent score fixture specifies all cell outcomes by hand: 125 expected,
+70 strictly correct, four additional transition matches, 102 reliable voice cells.
+Reported values are 56%, 59.2%, and 81.6%, respectively. Tests also prove a nearby
+successful observation cannot replace a closer silent/wrong observation; duplicates,
+count-in and tail observations cannot inflate the result; decoded JSON reproduces
+the same scores; and a wholly missing note remains zero across six tempos. No
+threshold, denominator or detector was modified to improve these results.
+
+UI percentages are rounded to one decimal from those same computed values; raw
+values remain in JSON. Short user-facing errors are separate from detailed logged
+and exported calibration rejections. Both calibration and practice reports can
+be shared from the optional Details section.

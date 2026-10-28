@@ -9,16 +9,16 @@ final class ScaleViewModel: ObservableObject {
 
         var title: String {
             switch self {
-            case .low: return "Test A · Low Pitch"
-            case .comfortable: return "Test B · Comfortable Pitch"
-            case .high: return "Test C · High Pitch"
+            case .low: return "1 · Comfortable low"
+            case .comfortable: return "2 · Comfortable middle"
+            case .high: return "3 · Comfortable high"
             }
         }
         var prompt: String {
             switch self {
-            case .low: return "Sing a comfortable note in your lowest natural pitch."
-            case .comfortable: return "Now sing a note that feels natural and comfortable."
-            case .high: return "Finally, sing a comfortable note in your highest natural pitch."
+            case .low: return "Hold a low “Aa” that feels comfortable. Do not strain."
+            case .comfortable: return "Hold an “Aa” in the middle of your comfortable voice."
+            case .high: return "Hold a higher “Aa” comfortably, without straining."
             }
         }
         var icon: String {
@@ -38,6 +38,7 @@ final class ScaleViewModel: ObservableObject {
     @Published private(set) var recordingElapsed: Double = 0
     @Published var errorMessage: String?
     @Published var permissionDenied = false
+    @Published private(set) var auditURL: URL?
     @Published private(set) var sa: Double = 0
     @Published private(set) var isOpening = false
     @Published private(set) var isReferencePlaying = false
@@ -94,6 +95,7 @@ final class ScaleViewModel: ObservableObject {
     private func startTest(_ test: Test) {
         guard screenActive, activeTest == nil, !isOpening, !isReferencePlaying else { return }
         errorMessage = nil
+        auditURL = nil
         permissionGeneration += 1
         let generation = permissionGeneration
         calibration.invalidate()
@@ -104,7 +106,7 @@ final class ScaleViewModel: ObservableObject {
             self.isOpening = false
             guard granted else {
                 self.permissionDenied = true
-                self.errorMessage = "Microphone access is turned off. Please allow it in Settings so Swar Saathi can hear you sing."
+                self.errorMessage = "Allow microphone access in Settings, then try again."
                 return
             }
             self.permissionDenied = false
@@ -128,7 +130,7 @@ final class ScaleViewModel: ObservableObject {
                 self.recordingStart = CACurrentMediaTime()
                 self.activeTest = test
                 self.recordingElapsed = 0
-                self.recordingStatus = "Hold one comfortable Aa. Small fluctuations are okay."
+                self.recordingStatus = "Keep holding a comfortable “Aa”."
                 self.recordingTimer?.invalidate()
                 let timer = Timer(timeInterval: CalibrationCapture.retryInterval, repeats: true) { [weak self] _ in
                     guard self?.permissionGeneration == generation else { return }
@@ -137,7 +139,8 @@ final class ScaleViewModel: ObservableObject {
                 self.recordingTimer = timer
                 RunLoop.main.add(timer, forMode: .common)
             } catch {
-                self.errorMessage = error.localizedDescription
+                NSLog("Calibration microphone start failed: %@", error.localizedDescription)
+                self.errorMessage = "Couldn’t start the microphone. Check its connection and try again."
             }
         }
     }
@@ -160,13 +163,14 @@ final class ScaleViewModel: ObservableObject {
         switch status {
         case .interrupted:
             stopIfNeeded(markInactive: false)
-            errorMessage = "Audio was interrupted. This sample was not accepted; retry when ready."
+            errorMessage = "Recording was interrupted. Please record this sample again."
         case .resumed:
             stopIfNeeded(markInactive: false)
-            errorMessage = "The microphone route changed. Retry this sample with the selected input."
+            errorMessage = "Your microphone changed. Please record this sample again."
         case .failed(let m):
             stopIfNeeded(markInactive: false)
-            errorMessage = m
+            NSLog("Calibration microphone failed: %@", m)
+            errorMessage = "Recording stopped. Check your microphone and try again."
         }
     }
 
@@ -179,8 +183,8 @@ final class ScaleViewModel: ObservableObject {
         switch CalibrationCapture.evaluate(samples, start: recordingStart, now: now, manualStop: manualStop) {
         case .collecting:
             recordingStatus = recordingElapsed < CalibrationCapture.minimumDuration
-                ? "Hold one comfortable Aa. Small fluctuations are okay."
-                : "Still listening for a steady center. Keep singing comfortably; up to eight seconds."
+                ? "Keep holding a comfortable “Aa”."
+                : "Still listening. Keep your note steady and comfortable."
         case .accepted(let sample):
             finishRecording(sample: sample, rejection: nil, recordingEnd: now)
         case .rejected(let message):
@@ -200,9 +204,10 @@ final class ScaleViewModel: ObservableObject {
         measuredFrames[test] = samples
         measuredDurations[test] = recordingEnd - recordingStart
         guard let sample = sample else {
-            errorMessage = rejection ?? "No reliable calibration sample was measured. Please retry."
-            NSLog("Calibration rejected after %.2f s: %@", recordingEnd - recordingStart, errorMessage!)
-            saveAudit(status: errorMessage!)
+            let detail = rejection ?? "No reliable calibration sample was measured."
+            errorMessage = "We couldn’t get a steady note. Please record this sample again."
+            NSLog("Calibration rejected after %.2f s: %@", recordingEnd - recordingStart, detail)
+            saveAudit(status: detail)
             return
         }
         do {
@@ -217,10 +222,12 @@ final class ScaleViewModel: ObservableObject {
             NSLog("Calibration sample %@ after %.2f s: %.3f Hz, %.0f%% reliable coverage", test.title,
                   recordingEnd - recordingStart, sample.medianHz, 100 * sample.coverage)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = "We couldn’t find a comfortable Sa from these samples. Please record them again without straining."
             NSLog("Calibration recommendation rejected: %@", error.localizedDescription)
+            saveAudit(status: error.localizedDescription)
+            return
         }
-        saveAudit(status: errorMessage ?? "Measured sample accepted")
+        saveAudit(status: "Measured sample accepted")
     }
 
     func stopIfNeeded(markInactive: Bool = true) {
@@ -257,7 +264,8 @@ final class ScaleViewModel: ObservableObject {
             }
         } catch {
             isReferencePlaying = false
-            errorMessage = error.localizedDescription
+            NSLog("Sa playback failed: %@", error.localizedDescription)
+            errorMessage = "Couldn’t play the note. Check your sound output and try again."
         }
     }
 
@@ -273,7 +281,23 @@ final class ScaleViewModel: ObservableObject {
             try calibration.confirm()
             errorMessage = nil
             saveAudit(status: "Sa explicitly confirmed by singer; reference playback optional")
-        } catch { errorMessage = error.localizedDescription }
+        } catch {
+            NSLog("Sa confirmation failed: %@", error.localizedDescription)
+            errorMessage = "Please record your samples again before confirming Sa."
+        }
+    }
+
+    func retryCalibration() {
+        stopIfNeeded(markInactive: false)
+        calibration.invalidate()
+        results.removeAll()
+        summaries.removeAll()
+        samples.removeAll()
+        measuredFrames.removeAll()
+        measuredDurations.removeAll()
+        sa = 0
+        errorMessage = nil
+        auditURL = nil
     }
 
     // MARK: Sa adjustment
@@ -292,10 +316,16 @@ final class ScaleViewModel: ObservableObject {
             try calibration.adjust(to: value)
             sa = value
             errorMessage = nil
-        } catch { errorMessage = error.localizedDescription }
+            saveAudit(status: "Sa manually adjusted; confirmation required")
+        } catch {
+            NSLog("Sa adjustment rejected: %@", error.localizedDescription)
+            errorMessage = "That note is outside your recorded range. Try a smaller change."
+        }
     }
 
     private func saveAudit(status: String) {
+        // Never offer a previous report if saving the current state fails.
+        auditURL = nil
         struct Audit: Codable {
             let created: Date
             let status: String
@@ -316,7 +346,9 @@ final class ScaleViewModel: ObservableObject {
                               recommendation: recommendation, confirmedSa: calibration.confirmedSa)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(audit).write(to: folder.appendingPathComponent("calibration-\(UUID().uuidString).json"), options: .atomic)
+            let url = folder.appendingPathComponent("calibration-\(UUID().uuidString).json")
+            try encoder.encode(audit).write(to: url, options: .atomic)
+            auditURL = url
         } catch { NSLog("Calibration diagnostic export failed: %@", error.localizedDescription) }
     }
 }

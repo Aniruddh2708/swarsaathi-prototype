@@ -32,3 +32,33 @@ source membership checks passed. A local audit replayer uses the production
 scorer without changing observations. The supplied report is not published.
 Actual button tapping, graph readability and patient capture still require a
 fresh on-device trial; an Apple CI build does not substitute for those checks.
+
+
+## Interface clarity and independent measurement audit — October 28
+
+Changed `ScaleDiscoveryView.swift`, `ScaleViewModel.swift`, `PracticeView.swift`,
+`PracticeViewModel.swift`, `PitchGraphView.swift`, and `SummaryView.swift`. Removed the post-analysis
+chart and duplicate finished-state panels; retained the live guide, one overall
+pitch-match percentage and each-note boxes. Percentages use one decimal. Details
+and report sharing are optional. Calibration errors give a short retry instruction;
+full rejection reasons and raw observations remain in the saved diagnostic report.
+A complete calibration retry clears confirmation and all three samples. Technical
+formulas and implementation details are documented in `TECHNICAL_WALKTHROUGH.md`.
+
+Added `CalibrationPipelineTests.swift` (3 tests), `ScoreAuditTests.swift` (5 tests),
+and `docs/evidence/clarity-core.log`. Command:
+`sh scripts/test.sh --scratch-path /tmp/core-validation-build`.
+All **75 tests passed, zero failures, 4.613 seconds**. No failing regression or
+algorithm change was required in this milestone. All Swift sources passed syntax
+parsing; Apple compilation is checked separately in CI after pushing.
+
+24 synthetic harmonic/noisy/vibrato vowels passed through the real shared worker
+and YIN: maximum sample-median error **0.671688 cents**, median **0.201727 cents**,
+minimum coverage **99.282%**. All **8/8** measured tonic recommendations matched
+recommendations from known input pitches and fitted the exercise. Independent
+scoring arithmetic verified 70 strict + 4 transition matches out of 125 expected
+cells: **56% strict, 59.2% practice**. Saved JSON replay reproduced results exactly.
+
+These tests do not establish near-perfect real-singer accuracy, device latency,
+or a uniquely correct personal Sa. On-device layout, retry controls, microphone
+routes and independently annotated real singing remain the next validation stage.

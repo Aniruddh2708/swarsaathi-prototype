@@ -10,9 +10,9 @@ struct ScaleDiscoveryView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Discover Your Scale")
+                    Text("Find my Sa")
                         .font(.largeTitle.bold())
-                    Text("Let's understand your comfortable singing range.")
+                    Text("Record three comfortable notes to find a Sa for practice.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
@@ -26,16 +26,21 @@ struct ScaleDiscoveryView: View {
                 }
 
                 if vm.isComplete {
-                    analysisCard
-                    if vm.recommendation != nil { saCard }
-                    Button {
-                        showPractice = true
-                    } label: {
-                        Label("Start Alankaar Practice", systemImage: "music.note.list")
+                    if vm.recommendation != nil {
+                        saCard
+                        Button {
+                            showPractice = true
+                        } label: {
+                            Label("Start Alankaar Practice", systemImage: "music.note.list")
+                        }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .disabled(!vm.canPractice)
                     }
-                    .buttonStyle(PrimaryButtonStyle())
-                    .disabled(!vm.canPractice)
-                    .padding(.bottom, 24)
+                    Button("Record all three again") { vm.retryCalibration() }
+                        .disabled(vm.activeTest != nil || vm.isOpening)
+                }
+                if vm.auditURL != nil {
+                    analysisCard
                 }
             }
             .padding(20)
@@ -56,30 +61,18 @@ struct ScaleDiscoveryView: View {
     }
 
     private var analysisCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Scale Analysis", systemImage: "chart.bar.xaxis")
-                .font(.headline)
-            analysisRow("Lowest pitch", vm.low)
-            analysisRow("Comfortable pitch", vm.comfortable)
-            analysisRow("Highest pitch", vm.high)
-            if let semis = vm.rangeSemitones {
-                Divider()
-                HStack {
-                    Text("Measured sample span").foregroundColor(.secondary)
-                    Spacer()
-                    Text(String(format: "%.1f octaves (%.0f semitones)", semis / 12, semis))
-                        .fontWeight(.semibold)
+        DisclosureGroup("Details") {
+            VStack(alignment: .leading, spacing: 10) {
+                analysisRow("Low", vm.low)
+                analysisRow("Middle", vm.comfortable)
+                analysisRow("High", vm.high)
+                Text("Sa is a suggested starting note for this exercise, not a fixed personal scale.")
+                    .font(.footnote).foregroundColor(.secondary)
+                if let url = vm.auditURL {
+                    ShareLink(item: url) { Label("Share report", systemImage: "square.and.arrow.up") }
                 }
-                .font(.subheadline)
             }
-            if vm.orderLooksWrong {
-                Text("The guided samples changed order. Reversals beyond their measured uncertainty require a retry; overlapping measurements can remain usable.")
-                    .font(.footnote)
-                    .foregroundColor(.swarOrange)
-            }
-            Text("Three short vowels only approximate a comfortable range. A trial Sa is fitted to the measured boundaries and the five-note exercise, then explicitly confirmed by you. Listening to the suggested tone is optional.")
-                .font(.footnote)
-                .foregroundColor(.secondary)
+            .padding(.top, 10)
         }
         .card()
     }
@@ -97,21 +90,15 @@ struct ScaleDiscoveryView: View {
 
     private var saCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Recommended Sa (tonic)", systemImage: "tuningfork")
+            Label("Suggested Sa", systemImage: "tuningfork")
                 .font(.headline)
-            Text("Trial Sa: \(String(format: "%.2f", vm.sa)) Hz")
+            Text(PitchMath.nearestNote(vm.sa).name)
                 .font(.system(size: 36, weight: .bold, design: .rounded))
                 .foregroundStyle(LinearGradient(colors: [.swarBlue, .swarPurple],
                                                 startPoint: .leading, endPoint: .trailing))
-            Text("Nearest musical note for reference: \(PitchMath.noteText(vm.sa)). Western note names don't define the Indian classical scale.")
-                .font(.footnote)
-                .foregroundColor(.secondary)
-            if let recommendation = vm.recommendation {
-                Text(recommendation.explanation)
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-            }
-            Button(vm.isReferencePlaying ? "Stop reference" : "Play suggested Sa (optional)") {
+            Text("Confirm if this feels comfortable for you.")
+                .font(.subheadline).foregroundColor(.secondary)
+            Button(vm.isReferencePlaying ? "Stop reference" : "Listen to Sa (optional)") {
                 if vm.isReferencePlaying { vm.stopReference() } else { vm.playReference() }
             }
                 .buttonStyle(PrimaryButtonStyle(filled: false))
@@ -119,13 +106,21 @@ struct ScaleDiscoveryView: View {
             Button(vm.isConfirmed ? "Sa confirmed" : "Confirm this Sa") { vm.confirmSa() }
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(!vm.canConfirm || vm.isConfirmed)
-            Text("Adjust within the measured exercise boundaries, then confirm again:")
-                .font(.subheadline)
-            HStack(spacing: 10) {
-                adjustButton("−1 semitone") { vm.shiftSa(semitones: -1) }
-                adjustButton("−1 Hz") { vm.nudgeSa(hz: -1) }
-                adjustButton("+1 Hz") { vm.nudgeSa(hz: 1) }
-                adjustButton("+1 semitone") { vm.shiftSa(semitones: 1) }
+            DisclosureGroup("Adjust Sa") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Adjust, then confirm again.").font(.footnote)
+                    Text(hzText(vm.sa)).font(.subheadline)
+                    HStack(spacing: 10) {
+                        adjustButton("Lower") { vm.shiftSa(semitones: -1) }
+                        adjustButton("Higher") { vm.shiftSa(semitones: 1) }
+                    }
+                    HStack(spacing: 10) {
+                        adjustButton("Fine −1 Hz") { vm.nudgeSa(hz: -1) }
+                        adjustButton("Fine +1 Hz") { vm.nudgeSa(hz: 1) }
+                    }
+                }
+                .padding(.top, 8)
+                .disabled(vm.isReferencePlaying || vm.isOpening || vm.activeTest != nil)
             }
         }
         .card()
@@ -154,7 +149,7 @@ struct TestCardView: View {
     private var enabled: Bool { vm.recordingControlsEnabled && vm.isUnlocked(test) && (vm.activeTest == nil || isActive) }
 
     private var buttonTitle: String {
-        if isActive { return "Stop & Save" }
+        if isActive { return "Finish recording" }
         return saved == nil ? "Start Recording" : "Record Again"
     }
 
@@ -174,17 +169,13 @@ struct TestCardView: View {
 
             if isActive {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(hzText(vm.liveFrequency))
-                        .font(.system(size: 44, weight: .bold, design: .rounded))
-                        .foregroundColor(vm.liveFrequency == nil ? .secondary : .swarBlue)
                     Text(vm.recordingStatus)
                         .font(.footnote)
                         .foregroundColor(.secondary)
                     LevelBar(level: vm.level)
                 }
-            } else if let s = saved {
-                Text("Saved: \(hzText(s)) · \(PitchMath.noteText(s))")
-                    .font(.title3.weight(.semibold))
+            } else if saved != nil {
+                Text("Recorded").font(.subheadline).foregroundColor(.swarGreen)
             }
 
             Button(buttonTitle) { vm.toggle(test) }

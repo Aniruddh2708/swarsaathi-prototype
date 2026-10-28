@@ -21,19 +21,15 @@ struct PracticeView: View {
                     ErrorBanner(message: b)
                 }
 
-                configurationCard
-                liveCard
-                graphCard
-                controls
-                sequenceCard
-
                 if vm.phase == .finished {
                     SummaryView(summary: vm.summary, results: vm.results,
-                                targets: vm.targets) { vm.prepareAgain() }
-                    if let url = vm.auditURL {
-                        ShareLink(item: url) { Label("Share audit JSON", systemImage: "square.and.arrow.up") }
-                            .font(.subheadline.bold())
-                    }
+                                targets: vm.targets, auditURL: vm.auditURL) { vm.prepareAgain() }
+                } else {
+                    if vm.phase == .idle { configurationCard }
+                    controls
+                    if vm.phase == .running { liveCard }
+                    graphCard
+                    sequenceCard
                 }
             }
             .padding(20)
@@ -61,7 +57,7 @@ struct PracticeView: View {
 
     private var configurationCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Guided exercise").font(.headline)
+            Text("Choose your Alankaar").font(.headline)
             Picker("Alankaar", selection: $vm.selectedExerciseIndex) {
                 ForEach(Array(vm.exercises.enumerated()), id: \.offset) { index, exercise in
                     Text(exercise.name).tag(index)
@@ -70,10 +66,10 @@ struct PracticeView: View {
             .disabled(vm.phase == .running || vm.referencePlaying || vm.isStarting)
             Stepper("Tempo: \(Int(vm.bpm)) BPM", value: $vm.bpm, in: 40...120, step: 4)
                 .disabled(vm.phase == .running || vm.referencePlaying || vm.isStarting)
-            Text("Illustrative Shuddha ratios. Reference playback is optional. Start when ready and sing after the three-beat count-in. Targets follow the clock through mistakes and silence.")
+            Text("Sing one note per beat after the count-in.")
                 .font(.footnote).foregroundColor(.secondary)
             if vm.exercises.isEmpty {
-                Text("No exercise fits the measured comfortable range. Return to calibration.")
+                Text("Please go back and record your comfortable range again.")
                     .font(.footnote).foregroundColor(.swarOrange)
             }
         }.card()
@@ -82,10 +78,10 @@ struct PracticeView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Alankaar Practice").font(.largeTitle.bold())
-            Text("Sing along with the notes and find out how accurately you match them.")
+            Text(vm.phase == .finished ? "See how each note went." : "Follow the notes at a comfortable pace.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
-            Label("Your Sa: \(Int(vm.sa)) Hz · \(PitchMath.noteText(vm.sa))", systemImage: "tuningfork")
+            Label("Your Sa: \(PitchMath.nearestNote(vm.sa).name)", systemImage: "tuningfork")
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .background(Color.swarPurple.opacity(0.12))
@@ -107,23 +103,6 @@ struct PracticeView: View {
                     .font(.footnote)
                     .foregroundColor(.secondary)
             }
-            Text("Expected: \(target.label) – \(hzText(target.frequency))")
-                .font(.headline)
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Detected").font(.caption).foregroundColor(.secondary)
-                    Text(hzText(vm.detectedHz))
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("Difference").font(.caption).foregroundColor(.secondary)
-                    Text(vm.cents.map { String(format: "%+.0f cents", $0) } ?? "— cents")
-                        .font(.system(size: 22, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                }
-            }
             CentsMeter(cents: vm.cents)
             Text(vm.feedback)
                 .font(.headline)
@@ -131,8 +110,6 @@ struct PracticeView: View {
                 .animation(.easeInOut(duration: 0.15), value: vm.feedback)
             ProgressView(value: vm.holdProgress)
                 .tint(.swarGreen)
-            Text("Guided note progress · not a successful-hold requirement")
-                .font(.caption2).foregroundColor(.secondary)
             if vm.phase == .running {
                 HStack(spacing: 8) {
                     Image(systemName: "mic.fill").foregroundColor(.swarPurple)
@@ -145,7 +122,7 @@ struct PracticeView: View {
 
     private var graphCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Your pitch over time").font(.headline)
+            Text("Follow the melody").font(.headline)
             PitchGraphView(points: vm.graphPoints,
                            ladder: vm.ladder,
                            currentTarget: vm.currentTarget.frequency,
@@ -158,9 +135,6 @@ struct PracticeView: View {
                 legend(.swarPurple, "Target note")
                 legend(.swarBlue, "Your voice")
             }
-            Text("Blue above the purple line means you're singing higher than the note; below means lower. The shaded band is the \"on target\" zone.")
-                .font(.footnote)
-                .foregroundColor(.secondary)
         }
         .card()
     }
@@ -175,15 +149,15 @@ struct PracticeView: View {
     private var controls: some View {
         Group {
             if vm.phase == .running {
-                Button { vm.finishEarly() } label: { Label("Stop and report incomplete attempt", systemImage: "stop.fill") }
+                Button { vm.finishEarly() } label: { Label("Stop practice", systemImage: "stop.fill") }
                     .buttonStyle(PrimaryButtonStyle())
             } else if vm.phase == .idle {
                 Button { vm.referencePlaying ? vm.stopReference() : vm.playReference() } label: {
-                    Label(vm.referencePlaying ? "Stop reference" : "Play reference Alankaar (optional)", systemImage: vm.referencePlaying ? "stop.fill" : "play.fill")
+                    Label(vm.referencePlaying ? "Stop reference" : "Listen first (optional)", systemImage: vm.referencePlaying ? "stop.fill" : "play.fill")
                 }
                 .buttonStyle(PrimaryButtonStyle(filled: false))
                 .disabled(vm.isStarting || vm.exercises.isEmpty)
-                Button { vm.start() } label: { Label("Start Practice", systemImage: "mic.fill") }
+                Button { vm.start() } label: { Label(vm.isStarting ? "Opening microphone…" : "Start Practice", systemImage: "mic.fill") }
                     .buttonStyle(PrimaryButtonStyle())
                     .disabled(!vm.canStart)
             }
@@ -193,10 +167,7 @@ struct PracticeView: View {
     private var sequenceCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Alankaar").font(.headline)
-            Text("One beat per note. Missing notes remain in the full-exercise score.")
-                .font(.footnote)
-                .foregroundColor(.secondary)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 80), spacing: 8)], spacing: 8) {
                 ForEach(vm.targets) { t in
                     NoteCardView(target: t,
                                  result: vm.results[t.index],
@@ -231,12 +202,10 @@ struct NoteCardView: View {
     var body: some View {
         VStack(spacing: 3) {
             Text(target.label).font(.headline)
-            Text("\(Int(target.frequency.rounded())) Hz")
-                .font(.caption2)
-                .foregroundColor(.secondary)
             if let result = result {
-                Text(String(format: "%.0f%% match", result.practiceMatchPercent))
-                    .font(.caption2)
+                Text(String(format: "%.1f%%", result.practiceMatchPercent))
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
             }
             Image(systemName: icon)
                 .font(.caption)

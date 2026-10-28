@@ -18,7 +18,7 @@ final class PracticeViewModel: ObservableObject {
     @Published private(set) var currentIndex = 0
     @Published private(set) var detectedHz: Double?
     @Published private(set) var cents: Double?
-    @Published private(set) var feedback = "Start when ready, or listen to the optional reference first."
+    @Published private(set) var feedback = "Start when you’re ready."
     @Published private(set) var feedbackKind: FeedbackKind = .neutral
     // Source-compatible name; now guided note progress, never a success gate.
     @Published private(set) var holdProgress: Double = 0
@@ -78,13 +78,13 @@ final class PracticeViewModel: ObservableObject {
         targets = exercises[selectedExerciseIndex].targets(sa: sa, tuning: .justShuddha)
         resetSession()
         phase = .idle
-        feedback = "Ready to start. Reference playback is optional."
+        feedback = "Ready to start."
     }
 
     func playReference() {
         guard phase != .running && !isStarting else { return }
         guard !exercises.isEmpty, targetsFitRange() else {
-            errorMessage = "No selected exercise fits the measured comfortable range. Return to calibration."
+            errorMessage = "Please go back and record your comfortable range again."
             return
         }
         engine.stop()
@@ -96,11 +96,12 @@ final class PracticeViewModel: ObservableObject {
                 guard let self = self else { return }
                 self.referencePlaying = false
                 self.referenceComplete = completed
-                self.feedback = completed ? "Reference complete. Start when ready for the three-beat count-in." : "Reference stopped. Start when ready, or listen again."
+                self.feedback = completed ? "Ready. Sing after the count-in." : "Ready to start."
             }
         } catch {
             referencePlaying = false
-            errorMessage = error.localizedDescription
+            NSLog("Practice reference failed: %@", error.localizedDescription)
+            errorMessage = "Couldn’t play the melody. Check your sound output and try again."
         }
     }
 
@@ -119,7 +120,7 @@ final class PracticeViewModel: ObservableObject {
 
     func start() {
         guard canStart && targetsFitRange() else {
-            errorMessage = "Select an exercise that fits your confirmed Sa before starting."
+            errorMessage = "Choose an exercise before starting."
             return
         }
         // Starting is an explicit choice; optional playback ends before permission/capture.
@@ -161,7 +162,8 @@ final class PracticeViewModel: ObservableObject {
             tick()
         } catch {
             engine.stop()
-            errorMessage = error.localizedDescription
+            NSLog("Practice microphone start failed: %@", error.localizedDescription)
+            errorMessage = "Couldn’t start the microphone. Check its connection and try again."
             phase = .idle
         }
     }
@@ -197,7 +199,7 @@ final class PracticeViewModel: ObservableObject {
         }
         if now - lastVoicedTime > 0.25 {
             detectedHz = nil; cents = nil
-            feedback = "No reliable voice. The guided target continues."
+            feedback = "Keep singing with the guide."
             feedbackKind = .neutral
         }
         if now - lastScoreTime > 0.2 {
@@ -217,7 +219,7 @@ final class PracticeViewModel: ObservableObject {
         else { shutdown() }
     }
 
-    private func finish(incomplete: Bool, reason: String? = nil) {
+    private func finish(incomplete: Bool, reason: String? = nil, userMessage: String? = nil) {
         guard phase == .running else { return }
         // Existing observations are retained; unobserved future cells stay zero.
         requestGeneration += 1
@@ -230,8 +232,8 @@ final class PracticeViewModel: ObservableObject {
         level = 0; detectedHz = nil; cents = nil
         holdProgress = 1
         incompleteReason = incomplete ? (reason ?? "Attempt incomplete; remaining notes count as missing.") : nil
-        banner = incompleteReason
-        feedback = incomplete ? "Attempt incomplete. Missing expected voice decreases the score." : "Session complete. Review every expected note."
+        banner = incomplete ? (userMessage ?? "Stopped early. Unfinished notes count as missing.") : nil
+        feedback = incomplete ? "Stopped early. Unfinished notes count as missing." : "Practice complete."
         feedbackKind = .neutral
         writeAudit(incomplete: incomplete)
     }
@@ -241,7 +243,9 @@ final class PracticeViewModel: ObservableObject {
         resetSession()
         phase = .idle
         referenceComplete = false
-        feedback = "Ready for another attempt. Start now or listen to the optional reference."
+        errorMessage = nil
+        banner = nil
+        feedback = "Ready for another try."
     }
 
     func shutdown() {
@@ -257,14 +261,16 @@ final class PracticeViewModel: ObservableObject {
     }
 
     /// Retained API for callers, but guided targets cannot be manually advanced.
-    func skipNote() { banner = "Targets follow the fixed BPM. Remain silent for a missed note or stop the attempt." }
+    func skipNote() { banner = "Keep following the guide." }
 
     private func handle(_ status: EngineStatus) {
         guard phase == .running else { return }
         switch status {
-        case .interrupted: finish(incomplete: true, reason: "Audio interrupted. Restart rather than resume an uncertain timeline.")
-        case .resumed: finish(incomplete: true, reason: "Audio route restarted. Begin a fresh attempt when ready.")
-        case .failed(let message): finish(incomplete: true, reason: message)
+        case .interrupted: finish(incomplete: true, reason: "Audio interrupted. Restart rather than resume an uncertain timeline.", userMessage: "Recording was interrupted. Tap Practice Again when ready.")
+        case .resumed: finish(incomplete: true, reason: "Audio route restarted. Begin a fresh attempt when ready.", userMessage: "Your microphone changed. Tap Practice Again when ready.")
+        case .failed(let message):
+            NSLog("Practice microphone failed: %@", message)
+            finish(incomplete: true, reason: message, userMessage: "Recording stopped. Check your microphone, then tap Practice Again.")
         }
     }
 
@@ -282,7 +288,7 @@ final class PracticeViewModel: ObservableObject {
         // Keep the complete fixed exercise trace (at most 24 seconds).
         guard observation.isReliable, let f = raw else {
             detectedHz = nil; cents = nil
-            feedback = "No reliable voice. The guided target continues."
+            feedback = "Keep singing with the guide."
             feedbackKind = .neutral
             return
         }
@@ -291,8 +297,8 @@ final class PracticeViewModel: ObservableObject {
         let error = PitchMath.cents(detected: f, expected: note.target.frequency)
         cents = error
         switch thresholds.classify(error) {
-        case .veryAccurate: feedback = "Very accurate. Follow the guided tempo."; feedbackKind = .perfect
-        case .onTarget: feedback = "On target. Follow the guided tempo."; feedbackKind = .onTarget
+        case .veryAccurate: feedback = "On note—keep going."; feedbackKind = .perfect
+        case .onTarget: feedback = "On note—keep going."; feedbackKind = .onTarget
         case .needsAdjustment:
             if timeline.matchesForPractice(observation, thresholds: thresholds) {
                 feedback = "Changing note—keep going."
@@ -333,6 +339,9 @@ final class PracticeViewModel: ObservableObject {
             try encoder.encode(audit).write(to: url, options: .atomic)
             auditURL = url
             NSLog("SwarSaathi audit saved %@; %.1f%%, observations %d", url.lastPathComponent, scored.summary.accuracyPercent, observations.count)
-        } catch { errorMessage = "Report remains on screen, but JSON export failed: \(error.localizedDescription)" }
+        } catch {
+            NSLog("Practice report export failed: %@", error.localizedDescription)
+            errorMessage = "Your results are shown, but the report couldn’t be saved."
+        }
     }
 }

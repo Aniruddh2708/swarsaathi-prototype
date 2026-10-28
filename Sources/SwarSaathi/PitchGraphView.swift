@@ -50,7 +50,7 @@ struct PitchGraphView: View {
             context.stroke(p, with: .color(Color.gray.opacity(0.25)),
                            style: StrokeStyle(lineWidth: 0.8, dash: [3, 4]))
             let isCurrent = abs(line.hz - currentTarget) < 0.01
-            context.draw(Text("\(line.name) \(Int(line.hz.rounded()))")
+            context.draw(Text(line.name)
                             .font(.system(size: 9, weight: isCurrent ? .bold : .regular))
                             .foregroundColor(isCurrent ? .swarPurple : .gray),
                          at: CGPoint(x: plot.minX - 4, y: y), anchor: .trailing)
