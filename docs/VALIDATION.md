@@ -175,3 +175,34 @@ UI percentages are rounded to one decimal from those same computed values; raw
 values remain in JSON. Short user-facing errors are separate from detailed logged
 and exported calibration rejections. Both calibration and practice reports can
 be shared from the optional Details section.
+
+
+## Exercise independence regression — October 29
+
+The previous exercise-constrained calibration policy is superseded. Three new
+regressions first reproduced changing Sa when the exercise changes, rejecting
+good voice evidence because Ga would not fit, and preventing a manually selected
+reference inside the recorded boundaries. The
+[before log](evidence/exercise-independence-before.log) preserves all three failures.
+After removing exercise inputs from calibration and moving target checks into
+`Alankaar.fits`, the focused 29-test selection passed; the
+[full run](evidence/exercise-independence-release.log) passed **85 tests, zero
+failures in 4.010 seconds**. The original YIN, coverage/spread gates, transition
+allowance and score calculation were not modified.
+
+The voice-only reference uses the geometric mean of the measured range center
+and comfortable middle, then chooses a nearby semitone-grid pitch within the
+same inset boundaries. Its selection metadata is exported in calibration schema
+2. This is a reproducible initial suggestion for singer confirmation, not a
+validated estimator of a unique personal tonic. Tests verify each voice input
+contributes, transposition/repeatability, confirmation/adjustment lifecycle,
+serialized policy evidence, and eligibility of different exercise spans without
+changing Sa. Synthetic microphone-worker tests still match all eight known-input
+voice-only reference proposals at 44.1/48 kHz.
+
+Range checks cover Ga-high, Pa-high, octave-high and lower-register definitions,
+unknown/missing swars, invalid ratios, invalid bounds and exact frequency edges.
+UI tests on a real device are still needed: select the short phrase, switch to
+the octave phrase, verify Sa stays fixed and that availability changes, then go
+back and explicitly adjust/reconfirm Sa. A range limitation should not ask the
+singer to repeat otherwise valid calibration automatically.

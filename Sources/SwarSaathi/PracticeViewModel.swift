@@ -48,11 +48,8 @@ final class PracticeViewModel: ObservableObject {
         self.engine = engine
         self.lowerHz = lowerHz
         self.upperHz = upperHz
-        self.exercises = Alankaar.demoExercises.filter { exercise in
-            exercise.targets(sa: sa, tuning: .justShuddha).allSatisfy { note in
-                (lowerHz == nil || note.frequency >= lowerHz!) && (upperHz == nil || note.frequency <= upperHz!)
-            }
-        }
+        // Keep every exercise visible. Availability is checked for the fixed Sa.
+        self.exercises = Alankaar.demoExercises
         let initial = (self.exercises.first ?? Alankaar.fiveNote).targets(sa: sa, tuning: .justShuddha)
         self.targets = initial
         self.results = Array(repeating: nil, count: initial.count)
@@ -67,7 +64,14 @@ final class PracticeViewModel: ObservableObject {
             .map { LadderLine(name: $0.label, hz: $0.frequency) }.sorted { $0.hz < $1.hz }
     }
     var summary: PracticeSummary { timeline.score(observations: observations, thresholds: thresholds).summary }
-    var canStart: Bool { !isStarting && !exercises.isEmpty && phase == .idle && targetsFitRange() }
+    var exerciseFitsRange: Bool {
+        guard exercises.indices.contains(selectedExerciseIndex) else { return false }
+        return exercises[selectedExerciseIndex].fits(sa: sa, lowerHz: lowerHz, upperHz: upperHz)
+    }
+    var rangeMessage: String? {
+        exerciseFitsRange ? nil : "Some notes are outside your recorded range. Choose another exercise or go back to adjust Sa."
+    }
+    var canStart: Bool { !isStarting && phase == .idle && exerciseFitsRange }
 
     private func configurationChanged() {
         guard phase != .running else { return }
@@ -78,13 +82,15 @@ final class PracticeViewModel: ObservableObject {
         targets = exercises[selectedExerciseIndex].targets(sa: sa, tuning: .justShuddha)
         resetSession()
         phase = .idle
+        errorMessage = nil
+        banner = nil
         feedback = "Ready to start."
     }
 
     func playReference() {
         guard phase != .running && !isStarting else { return }
-        guard !exercises.isEmpty, targetsFitRange() else {
-            errorMessage = "Please go back and record your comfortable range again."
+        guard exerciseFitsRange else {
+            errorMessage = rangeMessage
             return
         }
         engine.stop()
@@ -111,16 +117,9 @@ final class PracticeViewModel: ObservableObject {
         referenceComplete = false
     }
 
-    private func targetsFitRange() -> Bool {
-        sa.isFinite && sa > 0 && targets.allSatisfy { note in
-            note.frequency.isFinite && note.frequency > 0 &&
-                (lowerHz == nil || note.frequency >= lowerHz!) && (upperHz == nil || note.frequency <= upperHz!)
-        }
-    }
-
     func start() {
-        guard canStart && targetsFitRange() else {
-            errorMessage = "Choose an exercise before starting."
+        guard canStart else {
+            errorMessage = rangeMessage ?? "Choose an exercise before starting."
             return
         }
         // Starting is an explicit choice; optional playback ends before permission/capture.

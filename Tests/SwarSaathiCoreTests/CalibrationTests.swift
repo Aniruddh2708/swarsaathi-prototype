@@ -71,25 +71,24 @@ final class CalibrationTests: XCTestCase {
         XCTAssertEqual(result.spreadCents, 0, accuracy: 1e-9)
     }
 
-    func testRecommendationFitsOriginalFiveNoteRatiosAndIsNotMiddle() throws {
+    func testRecommendationBalancesMeasuredRangeAndMiddleWithoutExerciseRatios() throws {
         let samples = try [130.0, 195.0, 310.0].map { try sample($0) }
         let result = try CalibrationAnalyzer.recommend(samples: samples)
+        // This voice-only reference is G3. The old five-note fit returned F3.
+        XCTAssertEqual(result.saHz, 195.997717991, accuracy: 1e-6)
         XCTAssertNotEqual(result.saHz, samples[1].medianHz)
+        XCTAssertEqual(result.rangeCenterHz, sqrt(130 * 310), accuracy: 1e-9)
+        XCTAssertEqual(result.preferredSaHz, sqrt(sqrt(130 * 310) * 195), accuracy: 1e-9)
+        XCTAssertEqual(result.selectionMethod, "voice_range_center_and_middle_v1")
+        XCTAssertTrue(result.supports(result.saHz))
         let grid = 69 + 12 * log2(result.saHz / 440)
         XCTAssertEqual(grid, grid.rounded(), accuracy: 1e-9)
-        let targets = Alankaar.fiveNote.targets(sa: result.saHz, tuning: .justShuddha)
-        XCTAssertEqual(targets.map { $0.label }, ["Sa", "Re", "Ga", "Re", "Sa"])
-        XCTAssertEqual(targets[2].frequency / result.saHz, 1.25, accuracy: 1e-12)
-        for note in targets {
-            XCTAssertGreaterThanOrEqual(note.frequency, result.lowerHz)
-            XCTAssertLessThanOrEqual(note.frequency, result.upperHz)
-        }
     }
 
     func testCloseAndRepeatedLowMiddleMeasurementsAreAllowed() throws {
         let samples = try [221.90, 223.57, 321.32].map { try sample($0) }
         let result = try CalibrationAnalyzer.recommend(samples: samples)
-        XCTAssertEqual(result.saHz, 233.081880759, accuracy: 1e-6)
+        XCTAssertTrue(result.supports(result.saHz))
         XCTAssertEqual(result.measuredHz, [221.90, 223.57, 321.32])
         XCTAssertTrue(result.explanation.contains("similar"))
         let same = try CalibrationAnalyzer.recommend(samples: [samples[0], samples[0], samples[2]])
@@ -124,10 +123,11 @@ final class CalibrationTests: XCTestCase {
     }
 
     func testUnsupportedRangeAndInvalidSampleStatisticsAreRejected() throws {
-        let narrow = try [220.0, 240.0, 250.0].map { try sample($0) }
+        let narrow = try [220.0, 221.0, 222.0].map { try sample($0) }
         XCTAssertThrowsError(try CalibrationAnalyzer.recommend(samples: narrow))
         let close = try [221.90, 223.57, 321.32].map { try sample($0) }
-        XCTAssertThrowsError(try CalibrationAnalyzer.recommend(samples: close, exercise: .standard))
+        let measured = try CalibrationAnalyzer.recommend(samples: close)
+        XCTAssertFalse(Alankaar.standard.fits(sa: measured.saHz, lowerHz: measured.lowerHz, upperHz: measured.upperHz))
         XCTAssertThrowsError(try CalibrationAnalyzer.recommend(samples: Array(close.prefix(2))))
         let invalid = CalibrationSample(medianHz: 220, stabilityCents: 0, spreadCents: 0,
                                         voicedSeconds: 0.5, usableSeconds: 2, coverage: 0.25, frameCount: 20)
@@ -179,10 +179,68 @@ final class CalibrationTests: XCTestCase {
         try state.adjust(to: result.saHz + 1)
         XCTAssertNil(state.confirmedSa)
         XCTAssertTrue(state.canConfirm, "Adjustment needs manual confirmation, not mandatory playback")
-        XCTAssertThrowsError(try state.adjust(to: result.upperHz))
+        XCTAssertThrowsError(try state.adjust(to: result.upperHz * 1.01))
         XCTAssertEqual(state.recommendation?.saHz, result.saHz + 1)
         state.invalidate()
         XCTAssertNil(state.recommendation)
         XCTAssertNil(state.confirmedSa)
     }
+    func testTonicDoesNotChangeWhenExerciseChanges() throws {
+        let samples = try [130.0, 195.0, 310.0].map { try sample($0) }
+        let proposal = try CalibrationAnalyzer.recommend(samples: samples)
+        var session = CalibrationSession()
+        session.propose(proposal)
+        try session.confirm()
+        XCTAssertTrue(Alankaar.fiveNote.fits(sa: session.confirmedSa!, lowerHz: proposal.lowerHz, upperHz: proposal.upperHz))
+        XCTAssertFalse(Alankaar.standard.fits(sa: session.confirmedSa!, lowerHz: proposal.lowerHz, upperHz: proposal.upperHz))
+        XCTAssertEqual(session.recommendation, proposal)
+        XCTAssertEqual(session.confirmedSa, proposal.saHz)
+        XCTAssertEqual(try CalibrationAnalyzer.recommend(samples: samples), proposal)
+    }
+
+    func testUsableVoiceRangeDoesNotNeedToContainTheFiveNoteExercise() throws {
+        let samples = try [220.0, 240.0, 260.0].map { try sample($0) }
+        let result = try CalibrationAnalyzer.recommend(samples: samples)
+        XCTAssertTrue(result.supports(result.saHz))
+        XCTAssertFalse(Alankaar.fiveNote.fits(sa: result.saHz, lowerHz: result.lowerHz, upperHz: result.upperHz))
+        var session = CalibrationSession()
+        session.propose(result)
+        try session.confirm()
+        XCTAssertEqual(session.confirmedSa, result.saHz)
+    }
+
+    func testManualSaCanBeConfirmedEvenIfGaWouldExceedTheRange() throws {
+        var session = CalibrationSession()
+        session.propose(try CalibrationAnalyzer.recommend(samples: [130.0, 195.0, 310.0].map { try sample($0) }))
+        try session.adjust(to: 280)
+        try session.confirm()
+        XCTAssertEqual(session.confirmedSa, 280)
+    }
+
+    func testLowHighAndMiddleEachContributeToTheVoiceOnlyProposal() throws {
+        let baseline = try CalibrationAnalyzer.recommend(samples: [130.0, 195.0, 310.0].map { try sample($0) })
+        let changedLow = try CalibrationAnalyzer.recommend(samples: [160.0, 195.0, 310.0].map { try sample($0) })
+        let changedMiddle = try CalibrationAnalyzer.recommend(samples: [130.0, 240.0, 310.0].map { try sample($0) })
+        let changedHigh = try CalibrationAnalyzer.recommend(samples: [130.0, 195.0, 440.0].map { try sample($0) })
+        for changed in [changedLow, changedMiddle, changedHigh] {
+            XCTAssertNotEqual(changed.saHz, baseline.saHz)
+            XCTAssertTrue(changed.supports(changed.saHz))
+        }
+    }
+
+    func testVoiceOnlyRecommendationAndManualConfirmationRoundTrip() throws {
+        let proposal = try CalibrationAnalyzer.recommend(samples: [130.0, 195.0, 310.0].map { try sample($0) })
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(proposal)
+        XCTAssertEqual(try JSONDecoder().decode(SaRecommendation.self, from: data), proposal)
+        let text = String(decoding: data, as: UTF8.self)
+        XCTAssertFalse(text.contains("minimumRatio"))
+        XCTAssertFalse(text.contains("maximumRatio"))
+        var session = CalibrationSession()
+        session.propose(proposal)
+        try session.adjust(to: proposal.upperHz)
+        try session.confirm()
+        XCTAssertEqual(session.confirmedSa, proposal.upperHz)
+    }
+
 }

@@ -68,8 +68,8 @@ struct PracticeView: View {
                 .disabled(vm.phase == .running || vm.referencePlaying || vm.isStarting)
             Text("Sing one note per beat after the count-in.")
                 .font(.footnote).foregroundColor(.secondary)
-            if vm.exercises.isEmpty {
-                Text("Please go back and record your comfortable range again.")
+            if let message = vm.rangeMessage {
+                Text(message)
                     .font(.footnote).foregroundColor(.swarOrange)
             }
         }.card()
@@ -156,7 +156,7 @@ struct PracticeView: View {
                     Label(vm.referencePlaying ? "Stop reference" : "Listen first (optional)", systemImage: vm.referencePlaying ? "stop.fill" : "play.fill")
                 }
                 .buttonStyle(PrimaryButtonStyle(filled: false))
-                .disabled(vm.isStarting || vm.exercises.isEmpty)
+                .disabled(vm.isStarting || !vm.exerciseFitsRange)
                 Button { vm.start() } label: { Label(vm.isStarting ? "Opening microphone…" : "Start Practice", systemImage: "mic.fill") }
                     .buttonStyle(PrimaryButtonStyle())
                     .disabled(!vm.canStart)

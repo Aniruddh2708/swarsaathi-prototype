@@ -62,3 +62,46 @@ cells: **56% strict, 59.2% practice**. Saved JSON replay reproduced results exac
 These tests do not establish near-perfect real-singer accuracy, device latency,
 or a uniquely correct personal Sa. On-device layout, retry controls, microphone
 routes and independently annotated real singing remain the next validation stage.
+
+
+## Exercise-independent voice calibration — October 29
+
+Reproduced three failures before changing production code. With the same
+130/195/310 Hz samples, the five-note and octave exercises returned different
+Sa values (174.614116 vs 138.591315 Hz). A usable 220/240/260 Hz voice range was
+rejected only because Ga would not fit. An explicitly chosen Sa at 280 Hz was
+rejected despite being inside the recorded boundaries because its Ga exceeded
+them. See [the failing regressions](evidence/exercise-independence-before.log).
+Root cause: exercise ratios constrained calibration, candidate ranking and
+confirmation/adjustment validation.
+
+Changed `Calibration.swift`, `MusicTheory.swift`, `ScaleViewModel.swift`,
+`ScaleDiscoveryView.swift`, `PracticeViewModel.swift` and `PracticeView.swift`.
+`recommend(samples:)` now has no exercise/tuning input or reference to Alankaar.
+A disclosed initial-reference heuristic balances recorded range center and
+comfortable middle in log frequency, with singer confirmation. It never assigns
+a unique personal scale. The reference itself must fit the recorded boundaries;
+exercise ratios do not constrain it. Calibration audit schema 2 records the new
+method and its two reference values rather than obsolete exercise-span fields.
+
+`Alankaar.fits` separately checks every selected target at the fixed confirmed
+Sa, including notes below Sa. Exercises remain visible; ones outside the range
+show a short explanation and cannot start/play until the user chooses another
+or explicitly adjusts and reconfirms Sa. Selecting an exercise never mutates
+calibration. Audio detection, recording validity gates, timing and scoring
+thresholds are unchanged.
+
+Updated `CalibrationTests.swift` and `CalibrationPipelineTests.swift`; added
+`ExerciseRangeTests.swift`. Earlier exercise-specific expectations were moved
+or updated to reflect the corrected separation. Targeted command:
+`sh scripts/test.sh --filter 'CalibrationTests|CalibrationPipelineTests|ExerciseRangeTests'`
+passed **29 tests, zero failures**. Full `sh scripts/test.sh` passed **85 tests,
+zero failures in 4.010 s**; [release evidence](evidence/exercise-independence-release.log).
+All Swift files passed syntax parsing. The shared synthetic YIN/voice calibration
+still matched all eight known-input reference proposals; its sample median
+errors are unchanged. No new hardware or singer-comfort validation was executed.
+
+README, the source audit, beginner guide, technical guide and shareable stack
+now describe the independent stages. The equal log weighting and semitone grid
+are prototype preferences requiring singer/teacher review, not a validated
+biological formula. Real-device UI/range-switching checks remain necessary.

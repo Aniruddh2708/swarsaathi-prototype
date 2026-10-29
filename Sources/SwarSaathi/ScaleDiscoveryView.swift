@@ -66,7 +66,7 @@ struct ScaleDiscoveryView: View {
                 analysisRow("Low", vm.low)
                 analysisRow("Middle", vm.comfortable)
                 analysisRow("High", vm.high)
-                Text("Sa is a suggested starting note for this exercise, not a fixed personal scale.")
+                Text("Your confirmed Sa stays the same when you choose an exercise.")
                     .font(.footnote).foregroundColor(.secondary)
                 if let url = vm.auditURL {
                     ShareLink(item: url) { Label("Share report", systemImage: "square.and.arrow.up") }

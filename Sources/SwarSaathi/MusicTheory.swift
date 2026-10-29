@@ -55,6 +55,23 @@ struct Alankaar {
         }
     }
 
+    /// Availability check only: never selects, shifts or replaces the singer's Sa.
+    /// Every defined target, including notes below Sa, must fit the recorded range.
+    func fits(sa: Double, lowerHz: Double? = nil, upperHz: Double? = nil,
+              tuning: TuningSystem = .justShuddha) -> Bool {
+        guard sa.isFinite, sa > 0,
+              lowerHz == nil || (lowerHz!.isFinite && lowerHz! > 0),
+              upperHz == nil || (upperHz!.isFinite && upperHz! > 0),
+              lowerHz == nil || upperHz == nil || lowerHz! <= upperHz! else { return false }
+        let notes = targets(sa: sa, tuning: tuning)
+        guard !notes.isEmpty, notes.count == labels.count else { return false }
+        return notes.allSatisfy { note in
+            note.ratio.isFinite && note.ratio > 0 && note.frequency.isFinite && note.frequency > 0 &&
+                (lowerHz == nil || note.frequency >= lowerHz! - 1e-9) &&
+                (upperHz == nil || note.frequency <= upperHz! + 1e-9)
+        }
+    }
+
     /// Sa Re Ga Ma | Pa Dha Ni Sa'   /   Sa' Ni Dha Pa | Ma Ga Re Sa
     static let standard = Alankaar(name: "Basic Ascent & Descent", labels: [
         "Sa", "Re", "Ga", "Ma", "Pa", "Dha", "Ni", "Sa'",

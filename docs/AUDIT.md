@@ -51,7 +51,7 @@ flowchart TD
     Worker --> YIN[Original YIN + checked shared preprocessing]
     YIN --> Raw[rawFrequency; confidence; level; audio center time]
     Raw --> Calibration[Timed calibration coverage / stability]
-    Calibration --> Fit[Fit candidate tonic to measured span and exercise ratios]
+    Calibration --> Fit[Suggest reference from measured range center and comfortable middle]
     Fit --> Audition[Optional reference tone; explicit singer confirmation]
     Audition --> Targets[Shared NoteTarget definitions + fixed-BPM timeline]
     Targets --> Reference[Reference melody synthesis]
@@ -69,7 +69,7 @@ Reference playback is optional and is always stopped before microphone recording
 
 Calibration checks the full raw recording after 3.2 seconds and continues up to 8 seconds when more stable evidence is needed, with a documented 300 ms onset/end trim for held-vowel analysis. Within that usable interval it retains silence in coverage, requires at least one second/70%/20 reliable frames and rejects broad pitch movement. A trusted frame supports at most 50 ms. This trim is specific to calibration; practice scoring does not drop note edges.
 
-The measured median extrema, inset by 50 cents, bound trial tonics. Candidates must contain the exercise's actual minimum/maximum ratios. Ranking places the exercise's geometric midpoint near the comfortable-middle sample. A semitone grid referenced to A440 makes the proposal repeatable; the swar ratios remain unchanged. Similar low/middle values are accepted without a mandatory 100-cent separation. Clearly reversed labels beyond measured uncertainty, insufficient span, unreliable or contradictory statistics and unsupported exercises are rejected. Adjustments invalidate prior audition/confirmation.
+The measured median extrema, inset by 50 cents, bound reference pitches. As of October 29, calibration has no exercise/tuning parameter: it takes the geometric mean of the range center and comfortable-middle pitch, then chooses a nearby fitting semitone-grid reference. This disclosed starting-point heuristic requires singer confirmation; it does not establish a unique personal Sa. Similar low/middle samples remain valid; unstable/contradictory evidence and unusable inset ranges are still rejected. Adjustments invalidate confirmation. `Alankaar.fits` separately checks all selected targets at the same confirmed Sa. Exercises remain visible with a range message when unavailable; no exercise selection can change Sa or invalidate the voice measurements.
 
 Practice uses one beat per note, 40–120 BPM, and the same timeline for graph, reference and scoring. Every full note is divided into cells no longer than 40 ms. An observation belongs to one cell based on its captured timestamp; multiple observations are selected by proximity to cell center, never by pitch success. Missing/unreliable cells earn zero. Correct cells satisfy the original ±50-cent threshold. Per-note percentages are averaged over all expected notes. A complete absence of voice therefore scores zero; one correct note in a five-note exercise cannot become 100%.
 

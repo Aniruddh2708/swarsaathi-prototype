@@ -63,15 +63,15 @@ These words are enough to understand the main explanation:
 
    Consistently unstable or insufficient evidence asks the learner to record again. A similar low and middle pitch is allowed; there is no mandatory 100-cent gap. Clearly contradictory labels or an insufficient total range are rejected.
 
-5. **The app recommends a Sa that fits the exercise.**
+5. **The app suggests a Sa from the voice recordings, before choosing an exercise.**
 
-   Sa is the starting reference. We need the exercise's other notes to remain inside the range supported by the recordings. Choosing the middle sample directly could put the higher exercise notes outside that range.
+   Sa is the reference pitch. Calibration uses the three recordings and has no input for Ga, an Alankaar or its highest note. The suggestion balances the center of the measured range and the comfortable middle in musical pitch, then chooses a fitting reference note. This is a starting-point heuristic; the learner listens if helpful, can adjust within the recorded range, and confirms.
 
-   The algorithm places a small margin inside the measured low/high boundaries, finds candidate tonics that fit the exercise, then prefers one that puts the exercise's middle near the measured comfortable middle. Candidate tonics use a semitone grid for reproducibility. The learner can listen, make a permitted adjustment and explicitly confirm.
+   For example, measured low/middle/high pitches of 130, 195 and 310 Hz give a suggested Sa around 196 Hz under the current voice-only rule. Choosing another exercise keeps that confirmed Sa.
 
-   For example, measured low/middle/high pitches of 130, 195 and 310 Hz can produce a suggested Sa around 174.61 Hz. The suggestion is informed by the 195 Hz middle sample but is not simply assigned that value.
+   Each exercise is checked afterward: calculate all its notes from the fixed Sa and see whether they fit the recorded range. If one exercise goes too high or too low, it remains visible with an explanation; select another or go back to adjust Sa explicitly. Good calibration does not fail just because an exercise is large.
 
-   This is an exercise-compatible recommendation. Three short vowels cannot establish a uniquely correct lifelong personal Sa or the singer's complete vocal range. Listening to the reference is optional; confirmation is required. A new recording or adjustment invalidates the earlier confirmation.
+   Three short vowels cannot establish a uniquely correct lifelong personal Sa or a complete vocal range. The suggestion is not a validated biological determination. Listening is optional; confirmation is required. A new recording or adjustment invalidates the earlier confirmation.
 
 6. **The confirmed Sa creates the Alankaar targets.**
 
@@ -83,7 +83,7 @@ These words are enough to understand the main explanation:
    | Re | `Sa × 9/8` | 247.5 Hz |
    | Ga | `Sa × 5/4` | 275 Hz |
 
-   The expected sequence is therefore `220 → 247.5 → 275 → 247.5 → 220 Hz`. Choosing a different Sa moves the entire exercise while preserving those ratios. The full ascent/descent exercise is also available when it fits the confirmed measured range.
+   The expected sequence is therefore `220 → 247.5 → 275 → 247.5 → 220 Hz`. Choosing a different Sa moves the entire exercise while preserving those ratios. The full ascent/descent exercise is also selectable, with its range checked at the same confirmed Sa before playback or recording.
 
    A Western name such as A3 identifies the reference pitch; the exercise intervals still use the stated ratios. This prototype does not model every raga-specific intonation or ornament.
 
@@ -164,7 +164,7 @@ Rehearse the complete sequence before the presentation. If a recording fails, sh
 
 You can use this approximately one-minute introduction:
 
-> SwarSaathi is a native iPhone and iPad prototype for singing-pitch practice. First, the learner records comfortable low, middle and high vowels. We capture microphone samples with AVAudioEngine and use YIN to estimate how often the waveform repeats, which gives us its fundamental frequency. We check whether each sample contains enough consistent voice, then suggest a Sa that allows the exercise to fit within the measured range. The learner confirms that starting note. During practice, a clock advances Sa Re Ga Re Sa at the selected tempo while we independently measure the microphone pitch. We compare the two in cents and score the complete exercise, including wrong or missing notes, with a small allowance for note transitions. The result shows overall and per-note pitch matching. Processing happens on the device, and reports make the calculation reproducible. Our automated tests validate the algorithm and scoring; measured accuracy on real singers remains a separate validation stage.
+> SwarSaathi is a native iPhone and iPad prototype for singing-pitch practice. First, the learner records comfortable low, middle and high vowels. We capture microphone samples with AVAudioEngine and use YIN to estimate how often the waveform repeats, which gives us its fundamental frequency. We check whether each sample contains enough consistent voice, then suggest a reference Sa from the measured range center and comfortable middle, independently of exercise selection. The learner confirms that starting note. We then check each exercise against the measured range at that same Sa. During practice, a clock advances Sa Re Ga Re Sa at the selected tempo while we independently measure the microphone pitch. We compare the two in cents and score the complete exercise, including wrong or missing notes, with a small allowance for note transitions. The result shows overall and per-note pitch matching. Processing happens on the device, and reports make the calculation reproducible. Our automated tests validate the algorithm and scoring; measured accuracy on real singers remains a separate validation stage.
 
 Likely evaluator questions and short answers:
 
@@ -174,8 +174,9 @@ Likely evaluator questions and short answers:
 | What does YIN receive? | Audio amplitude samples and the sample rate. It estimates pitch without knowing the expected musical note. |
 | Why choose YIN? | It looks for the repeating period of a single voiced sound and can handle harmonic-rich vowels. It is suitable for this focused prototype, though real voices can still produce errors. |
 | Are you using an FFT to pick the loudest frequency? | No. This implementation uses YIN's time-domain difference calculation, accelerated with vector operations on Apple hardware. |
-| Why not use the middle sample directly as Sa? | We also need the entire exercise to fit the measured range. The middle sample guides the ranking of fitting candidates. |
-| Is Sa fixed for a person? | This app recommends a comfortable starting point for an exercise. It does not prove a permanent personal tonic. |
+| Why not use the middle sample directly as Sa? | The voice-only suggestion balances the measured range center and comfortable middle. Exercise checks happen separately after confirmation. |
+| Does selecting an exercise change Sa? | No. Sa is fixed for the practice session. Exercise notes are checked against the recorded range without rewriting calibration. |
+| Is Sa fixed for a person? | This app suggests a reference from voice recordings and asks the singer to confirm it. It does not prove a permanent personal tonic. |
 | Does a 0.9 confidence mean 90% singing accuracy? | No. Confidence measures waveform periodicity; pitch match measures agreement with the exercise; voice coverage measures reliable input over time. |
 | Why can a trained singer score below 100%? | The metric includes timing and missing/rejected observations, uses specific illustrative tuning, and does not measure complete musicianship. |
 | How do you avoid inflated scores? | Every scheduled note and time cell stays in the denominator; missing voice earns zero; targets never become microphone observations; raw evidence is exportable. |
@@ -185,3 +186,10 @@ Likely evaluator questions and short answers:
 | What would you improve next? | Validate a diverse set of real singers, quantify octave/voicing errors and device latency, evaluate tonic comfort with singers/teachers, and tune the practice experience based on that evidence. |
 
 Use the [shareable stack description](TECH_STACK.md) in your report. Keep the [complete formulas and source map](TECHNICAL_WALKTHROUGH.md) available for deeper questions.
+
+
+October 29 update: calibration and exercise selection are now independent. The
+current core run passed **85 tests, zero failures**; see the
+[regression evidence](evidence/exercise-independence-release.log) and
+[milestone details](MILESTONES.md). The earlier 75-test results above refer to
+revision `38b52e1`; they do not validate the new suggestion policy on real singers.

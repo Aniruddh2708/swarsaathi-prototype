@@ -5,7 +5,7 @@ interface simplification of October 28, 2026. It is intended for an evaluator or
 developer; the app itself keeps these details out of the normal singing flow.
 
 SwarSaathi is a native iPhone/iPad application that estimates a single singer's
-pitch, recommends an exercise-compatible Sa from three recorded vowels, and
+pitch, suggests a singer-confirmed Sa from three recorded vowels independently of exercises, and
 compares microphone observations with a timed Alankaar. The result is a measured
 **pitch-match percentage for the scheduled exercise**. It is not a probability
 that the singer is musically correct, a raga recognizer, or a measurement of a
@@ -51,7 +51,7 @@ flowchart TD
     D --> E[Raw pitch, confidence, audio timestamp]
     D --> F[Display-only pitch smoothing]
     E --> G[Find My Sa: three measured samples]
-    G --> H[Range fit and singer confirmation]
+    G --> H[Voice-based reference and singer confirmation]
     H --> I[Alankaar ratios and fixed target timeline]
     E --> J[Practice observations]
     I --> K[Full-exercise scorer]
@@ -75,7 +75,7 @@ smoothed display value.
 | `AudioProcessingRun.swift` | One isolated processing generation, overlapping windows, detector calls, smoothing and diagnostics. |
 | `PitchDetector.swift` | Configuration, DC/RMS preprocessing, YIN and display smoothing. |
 | `CalibrationCapture.swift` | Collect/accept/reject decisions over the recording interval. |
-| `Calibration.swift` | Sample statistics, validity checks, exercise-range fitting and explicit Sa confirmation. |
+| `Calibration.swift` | Sample statistics, validity checks, voice-only reference suggestion and explicit Sa confirmation. |
 | `ScaleViewModel.swift`, `ScaleDiscoveryView.swift` | Coordinate and display the low/middle/high recording flow. |
 | `MusicTheory.swift` | Swar ratios, exercises, cents arithmetic and reference note names. |
 | `PracticeTimeline.swift` | Clocked targets, full-exercise scoring and reference-wave synthesis. |
@@ -303,55 +303,60 @@ allowed only up to:
 
 This accommodates overlapping measurement uncertainty. There is **no requirement
 that low and middle differ by 100 cents**. Similar samples can be valid, but they
-provide little additional evidence about range. The measured total span must
-still accommodate the exercise.
+provide little additional evidence about range. A measured range must support a reference pitch within its inset boundaries; it need not contain any particular exercise.
 
-### Fitting Sa to the exercise
+### Suggesting Sa independently of any exercise
 
-The algorithm does not assign the middle sample directly to Sa. Let `L`, `M`,
-and `H` be the three measured pitches, and let `r_min`, `r_max` be the exercise's
-lowest and highest ratios relative to Sa. It first insets the measured extrema
-by 50 cents:
+Calibration accepts only the three voice samples. Its API has no exercise or tuning
+argument. The old exercise-midpoint fit is removed as of October 29: changing an
+Alankaar must not redefine the singer's reference pitch or invalidate good voice
+measurements. Ga's 1.25 ratio is used later only when building an exercise.
+
+Three vowels cannot determine a unique personal Sa. The app provides a disclosed
+starting-reference heuristic, then requires the singer's confirmation. Let `L`,
+`M`, and `H` be the measured medians. Retain the existing 50-cent inner margins:
 
 ```text
 lowerBoundary = min(L, M, H) × 2^(50/1200)
 upperBoundary = max(L, M, H) × 2^(−50/1200)
-
-minimumSa = lowerBoundary / r_min
-maximumSa = upperBoundary / r_max
+rangeCenter = sqrt(lowerBoundary × upperBoundary)
+preferredSa = sqrt(rangeCenter × M)
 ```
 
-For Sa Re Ga Re Sa, `r_min = 1` and `r_max = 1.25`. Every exercise target must fit
-inside the boundaries. An insufficient range is rejected instead of producing
-an unsupported recommendation.
+Geometric means take the midpoint in logarithmic musical pitch. The preferred
+reference gives equal weight to the measured range center and the self-reported
+comfortable middle in that space. This is an explicit prototype preference, not
+a physiological law or validated formula for a uniquely correct tonic. It is
+not merely an assignment of M, and it uses no exercise ratios.
 
-The implementation searches the equal-tempered semitone grid for reproducible
-candidate tonics:
+The implementation computes these means in log space to avoid multiplying large
+floating-point values. It searches fitting semitone-grid references within the
+recorded boundaries:
 
 ```text
 candidate(midi) = 440 × 2^((midi − 69)/12)
-exerciseMidpointRatio = sqrt(r_min × r_max)
-cost(candidate) = abs(1200 × log2(
-    candidate × exerciseMidpointRatio / M))
+cost(candidate) = abs(1200 × log2(candidate / preferredSa))
 ```
 
-Only candidates in `[minimumSa, maximumSa]` are considered. The geometric
-midpoint is appropriate because pitch intervals are logarithmic. The algorithm
-prefers the candidate that places the exercise's midpoint near the measured
-middle. Candidates within five cents of the best cost are treated as close;
-the lower candidate is selected consistently. A range with no fitting grid
-candidate is rejected even if a continuous-frequency solution might exist.
+Candidates within five cents of the best cost are treated as close, with the
+lower chosen consistently. For 130 / 195 / 310 Hz, boundaries are approximately
+133.81–301.17 Hz, range center 200.75 Hz, preferred reference 197.85 Hz and selected
+reference G3 ≈ 196.00 Hz. The previous five-note-specific F3 ≈ 174.61 Hz example
+is superseded. A range without a fitting grid reference is still inconclusive.
 
-For illustration, samples of 130, 195 and 310 Hz give boundaries of approximately
-133.81 and 301.17 Hz. A five-note exercise permits Sa from about 133.81 to
-240.94 Hz. The ideal continuous midpoint fit is `195/sqrt(1.25) ≈ 174.41 Hz`;
-the selected grid candidate is F3, about 174.61 Hz. The measured middle, 195 Hz,
-has informed the recommendation without being relabeled as Sa.
+After confirmation, `Alankaar.fits` generates every target at the fixed Sa and
+checks its actual frequency against the same recorded boundaries. It checks
+notes below Sa as well as high notes, rejects incomplete/invalid definitions,
+and has no ability to change Sa. Every available exercise remains visible;
+recording/reference playback is blocked when that selected exercise extends
+outside the range, with an instruction to choose another or explicitly adjust
+Sa. A larger exercise does not invalidate calibration.
 
-The Western grid and displayed note name are references for the proposed tonic.
-The Alankaar intervals use the separate Shuddha ratios below. Three vowels do
-not establish a person's complete range, raga, or single correct lifelong Sa.
-The recommendation remains a practical starting pitch for this exercise.
+Calibration diagnostic schema version 2 records `selectionMethod`, `rangeCenterHz`
+and `preferredSaHz`, replacing the obsolete exercise min/max-ratio fields.
+Manual adjustment is permitted for the reference itself within the recorded
+boundaries and always invalidates confirmation; exercise availability is then
+checked separately. This does not guarantee all exercises fit one tonic.
 
 ### Confirmation
 
@@ -382,8 +387,7 @@ expectedFrequency = confirmedSa × swarRatio
 
 These are illustrative just-intonation-style Shuddha ratios. They do not model
 every raga-dependent intonation or ornament. The short exercise is **Sa Re Ga Re
-Sa**. The original 16-note ascent/descent is also available when its targets fit
-the confirmed measured range.
+Sa**. The original 16-note ascent/descent is also selectable. Recording is enabled only when all selected targets fit the recorded range at the same confirmed Sa.
 
 Tempo is selectable from 40 to 120 BPM, with a default of 72 and one beat per
 note. There is a three-beat visual count-in. For zero-based note index `i`:
@@ -576,8 +580,9 @@ passes those PCM samples through the shared worker and YIN pipeline. The maximum
 error of the resulting sample medians was **0.671688 cents**, the median error
 was **0.201727 cents**, and minimum reliable coverage was **99.282%**. All eight
 three-vowel sets produced the same tonic as the corresponding known-input
-recommendation and fitted the exercise inside the measured boundaries. This
-checks consistency with the specified fitting rule; it does not prove a uniquely
+recommendation under the then-current exercise-fitting rule. That fitting rule
+is superseded by the October 29 voice-only recommendation. The latest 85-test run
+again matches all eight measured and known-input voice-only recommendations; it does not prove a uniquely
 correct tonic for a real singer.
 
 The same run verifies the hand-counted 56.0% strict / 59.2% practice / 81.6%
@@ -605,8 +610,10 @@ Successful CI tests and simulator compilation do not substitute for this stage.
 > microphone samples into a bounded worker pipeline. YIN estimates fundamental
 > frequency from waveform periodicity; we retain the raw pitch separately from
 > display smoothing. Three stable vowel samples provide a measured range, and
-> we fit a candidate Sa so the selected exercise stays inside that range. After
-> the singer confirms Sa, a monotonic clock advances the Alankaar independently
+> we suggest a reference Sa from that range and comfortable middle without using
+> an exercise. After
+> the singer confirms Sa, we check each exercise against the recorded range. A
+> monotonic clock advances a fitting Alankaar independently
 > of mistakes. We compare timestamped microphone pitches with those targets in
 > cents and score every expected time cell, including missing notes. A small,
 > explicit transition allowance supports normal note changes, while the strict
@@ -621,8 +628,8 @@ Common follow-up questions can be answered precisely:
 | Is this an AI/ML model? | No. It uses deterministic signal processing, robust statistics, musical ratios and a timed scoring rule. There is no training dataset or neural network. |
 | Why YIN? | It estimates waveform periodicity and is suitable for a single sustained singing voice with harmonics. The original implementation was preserved because deterministic tests did not justify replacing it. |
 | Why cents rather than a fixed Hz tolerance? | Cents measure frequency ratios. A fixed Hz error means different musical distances at low and high pitches. |
-| Is Sa just the middle vowel? | No. All three samples validate the measured span; exercise ratios constrain admissible Sa values; the middle vowel ranks fitting candidates. |
-| Why can two singers or two attempts receive different Sa suggestions? | Sa is chosen for comfortable practice under the measured evidence and exercise range. It is not a uniquely fixed identity inferred from the voice. |
+| Is Sa just the middle vowel? | No. All three samples validate the measured span; a voice-only reference balances its log-frequency center and the comfortable-middle sample. Exercise checks happen later. |
+| Why can two singers or two attempts receive different Sa suggestions? | The suggested reference depends on measured voice evidence and singer confirmation. The selected exercise never enters calibration. It is not a uniquely fixed identity inferred from the voice. |
 | Does 90% confidence mean 90% singing accuracy? | No. YIN confidence describes periodicity; pitch match compares observations with scheduled targets; voice coverage measures how much reliable voice was available. |
 | Does a missed note disappear from the average? | No. Every expected note and time cell remains in the denominator, even after stopping early. |
 | Why might an experienced singer score below 100%? | The score includes timing, missing/rejected observations and deviations from this illustrative tuning. It does not measure total musicianship or independently distinguish timing delay from pitch error. |

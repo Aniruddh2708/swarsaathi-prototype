@@ -54,7 +54,7 @@ final class CalibrationPipelineTests: XCTestCase {
                                                  recordingEnd: duration)
     }
 
-    func testMeasuredHarmonicVowelsRecommendTheSameFittingTonicAsKnownPitches() throws {
+    func testMeasuredHarmonicVowelsRecommendTheSameVoiceOnlyTonicAsKnownPitches() throws {
         let ranges = [[82.41, 110.0, 164.82], [130.0, 195.0, 310.0],
                       [221.90, 223.57, 321.32], [260.0, 390.0, 620.0]]
         var errors: [Double] = []
@@ -75,10 +75,6 @@ final class CalibrationPipelineTests: XCTestCase {
                 XCTAssertEqual(actual.saHz, ideal.saHz, accuracy: 1e-9)
                 if abs(actual.saHz - ideal.saHz) < 1e-9 { matchingRecommendations += 1 }
                 XCTAssertTrue(actual.supports(actual.saHz))
-                for target in Alankaar.fiveNote.targets(sa: actual.saHz, tuning: .justShuddha) {
-                    XCTAssertGreaterThanOrEqual(target.frequency, actual.lowerHz)
-                    XCTAssertLessThanOrEqual(target.frequency, actual.upperHz)
-                }
             }
         }
         print("SYNTHETIC_CALIBRATION_PIPELINE vowels=\(errors.count) sample_rates=44100,48000 vibrato_peak_cents=20 harmonics=3 additive_noise=true max_median_error_cents=\(errors.max()!) median_error_cents=\(PitchMath.median(errors)!) minimum_coverage=\(coverages.min()!) matching_tonic_recommendations=\(matchingRecommendations)/8 real_singing=false")
@@ -91,8 +87,10 @@ final class CalibrationPipelineTests: XCTestCase {
         XCTAssertThrowsError(try CalibrationAnalyzer.recommend(samples: [high, middle, low]))
         XCTAssertThrowsError(try CalibrationAnalyzer.recommend(samples: [low, high, middle]))
         XCTAssertThrowsError(try CalibrationAnalyzer.recommend(samples: [middle, middle, middle]))
-        XCTAssertTrue(try CalibrationAnalyzer.recommend(samples: [low, middle, high], exercise: .standard)
-            .supports(CalibrationAnalyzer.recommend(samples: [low, middle, high], exercise: .standard).saHz))
+        let reference = try CalibrationAnalyzer.recommend(samples: [low, middle, high])
+        XCTAssertTrue(reference.supports(reference.saHz))
+        // An octave exercise can be unavailable without rejecting measured voice.
+        XCTAssertFalse(Alankaar.standard.fits(sa: reference.saHz, lowerHz: reference.lowerHz, upperHz: reference.upperHz))
     }
 
     func testSmallOutliersDoNotReplaceTheMeasuredMedianOrPermitPersistentInstability() throws {

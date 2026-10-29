@@ -327,6 +327,7 @@ final class ScaleViewModel: ObservableObject {
         // Never offer a previous report if saving the current state fails.
         auditURL = nil
         struct Audit: Codable {
+            let schemaVersion: Int
             let created: Date
             let status: String
             let observations: [String: [CalibrationObservation]]
@@ -342,7 +343,7 @@ final class ScaleViewModel: ObservableObject {
             let rows = Dictionary(uniqueKeysWithValues: measuredFrames.map { ($0.key.title, $0.value) })
             let stats = Dictionary(uniqueKeysWithValues: summaries.map { ($0.key.title, $0.value) })
             let durations = Dictionary(uniqueKeysWithValues: measuredDurations.map { ($0.key.title, $0.value) })
-            let audit = Audit(created: Date(), status: status, observations: rows, samples: stats, recordingDurations: durations,
+            let audit = Audit(schemaVersion: 2, created: Date(), status: status, observations: rows, samples: stats, recordingDurations: durations,
                               recommendation: recommendation, confirmedSa: calibration.confirmedSa)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

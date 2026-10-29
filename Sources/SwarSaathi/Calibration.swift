@@ -23,14 +23,16 @@ struct SaRecommendation: Codable, Equatable {
     let lowerHz: Double
     let upperHz: Double
     let measuredHz: [Double]
-    let minimumRatio: Double
-    let maximumRatio: Double
+    let selectionMethod: String
+    let rangeCenterHz: Double
+    let preferredSaHz: Double
     var explanation: String
 
+    /// Whether the reference pitch itself is inside the recorded boundaries.
+    /// Exercise notes are checked independently by Alankaar.fits.
     func supports(_ frequency: Double) -> Bool {
         frequency.isFinite && frequency > 0 &&
-            frequency * minimumRatio >= lowerHz - 1e-9 &&
-            frequency * maximumRatio <= upperHz + 1e-9
+            frequency >= lowerHz - 1e-9 && frequency <= upperHz + 1e-9
     }
 }
 
@@ -124,11 +126,10 @@ enum CalibrationAnalyzer {
                                  usableSeconds: usable, coverage: coverage, frameCount: accepted.count)
     }
 
-    /// The Western grid supplies a reproducible trial tonic, not a fixed personal
-    /// Sa. Original illustrative just-Shuddha ratios define the exercise span.
-    /// Similar low/middle samples are valid but add no independent range span.
-    static func recommend(samples: [CalibrationSample], exercise: Alankaar = .fiveNote,
-                          tuning: TuningSystem = .justShuddha) throws -> SaRecommendation {
+    /// Voice-only starting-point heuristic, independent of exercise definitions.
+    /// Balance the measured range center and comfortable middle in log frequency.
+    /// The singer confirms the reference; this does not infer a unique personal Sa.
+    static func recommend(samples: [CalibrationSample]) throws -> SaRecommendation {
         guard samples.count == 3 else {
             throw CalibrationFailure.inconclusive("Three measured samples are required.")
         }
@@ -163,32 +164,23 @@ enum CalibrationAnalyzer {
                 }
             }
         }
-        let targets = exercise.targets(sa: 1, tuning: tuning)
-        guard targets.count == exercise.labels.count, !targets.isEmpty,
-              targets.allSatisfy({ $0.ratio.isFinite && $0.ratio > 0 }),
-              let minimumRatio = targets.map({ $0.ratio }).min(),
-              let maximumRatio = targets.map({ $0.ratio }).max() else {
-            throw CalibrationFailure.inconclusive("Exercise has invalid note definitions.")
-        }
         let lower = (values.min() ?? 0) * pow(2, marginCents / 1200)
         let upper = (values.max() ?? 0) * pow(2, -marginCents / 1200)
         guard lower.isFinite, upper.isFinite, lower < upper else {
             throw CalibrationFailure.inconclusive("These samples do not establish a usable range. Do not force your voice.")
         }
-        let minimumSa = lower / minimumRatio
-        let maximumSa = upper / maximumRatio
-        guard minimumSa <= maximumSa else {
-            throw CalibrationFailure.inconclusive("The measured range cannot contain this exercise with safety margins. Try a shorter exercise or collect more comfortable-range evidence; do not strain.")
-        }
-        let firstMidi = Int(ceil(69 + 12 * log2(minimumSa / 440) - 1e-10))
-        let lastMidi = Int(floor(69 + 12 * log2(maximumSa / 440) + 1e-10))
+        // Equal weight to range center and measured comfortable middle, in cents.
+        // This is a disclosed reference-pitch heuristic, not an exercise fit.
+        let rangeCenter = exp2((log2(lower) + log2(upper)) / 2)
+        let preferred = exp2((log2(rangeCenter) + log2(values[1])) / 2)
+        let firstMidi = Int(ceil(69 + 12 * log2(lower / 440) - 1e-10))
+        let lastMidi = Int(floor(69 + 12 * log2(upper / 440) + 1e-10))
         guard firstMidi <= lastMidi else {
             throw CalibrationFailure.inconclusive("No semitone-grid tonic fits these conservative boundaries.")
         }
-        let midpointRatio = sqrt(minimumRatio * maximumRatio)
         let candidates = (firstMidi...lastMidi).map { midi -> (frequency: Double, cost: Double) in
             let frequency = 440 * pow(2, Double(midi - 69) / 12)
-            let cost = abs(PitchMath.cents(detected: frequency * midpointRatio, expected: values[1]))
+            let cost = abs(PitchMath.cents(detected: frequency, expected: preferred))
             return (frequency, cost)
         }
         let best = candidates.map { $0.cost }.min() ?? .infinity
@@ -197,7 +189,7 @@ enum CalibrationAnalyzer {
             throw CalibrationFailure.inconclusive("No trial tonic is supported.")
         }
         let sampleText = values.map { String(format: "%.2f", $0) }.joined(separator: " / ")
-        var explanation = "Measured low/middle/high: \(sampleText) Hz. Boundaries use the lowest and highest actual measured medians, inset by 50 cents at each edge. \(exercise.name) fits using the original \(tuning.name) ratios. The exercise midpoint is placed near the measured middle. "
+        var explanation = "Measured low/middle/high: \(sampleText) Hz. Boundaries use the measured extrema, inset by 50 cents at each edge. The starting Sa balances the logarithmic range center and comfortable middle equally, then uses a fitting semitone-grid reference. No exercise or swar ratio enters this calculation. Exercise range checks happen after confirmation without changing Sa. "
         if abs(PitchMath.cents(detected: values[1], expected: values[0])) < 100 {
             explanation += "Low and middle are similar; both remain valid measurements, with limited independent range evidence. "
         }
@@ -206,8 +198,8 @@ enum CalibrationAnalyzer {
         }
         explanation += "Three short vowels only approximate a comfortable range. This is a trial tonic to listen to and confirm, not a uniquely fixed personal Sa."
         return SaRecommendation(saHz: choice.frequency, lowerHz: lower, upperHz: upper,
-                                measuredHz: values, minimumRatio: minimumRatio,
-                                maximumRatio: maximumRatio, explanation: explanation)
+                                measuredHz: values, selectionMethod: "voice_range_center_and_middle_v1",
+                                rangeCenterHz: rangeCenter, preferredSaHz: preferred, explanation: explanation)
     }
 }
 
@@ -250,10 +242,10 @@ struct CalibrationSession {
 
     mutating func adjust(to frequency: Double) throws {
         guard var proposal = recommendation, proposal.supports(frequency) else {
-            throw CalibrationFailure.inconclusive("That adjustment puts the exercise outside the measured comfortable boundaries.")
+            throw CalibrationFailure.inconclusive("That Sa is outside the measured comfortable boundaries.")
         }
         proposal.saHz = frequency
-        proposal.explanation += " Manually adjusted within the same measured boundaries; listen and confirm again."
+        proposal.explanation += " Manually adjusted within the same measured boundaries; confirm again. Listening is optional."
         propose(proposal)
     }
 }
