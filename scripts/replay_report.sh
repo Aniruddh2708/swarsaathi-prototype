@@ -5,10 +5,26 @@ if [ "$#" -ne 1 ]; then
     echo 'Usage: sh scripts/replay_report.sh path/to/practice.json' >&2
     exit 1
 fi
-if [ "$(uname -s)" = Darwin ]; then
-    compiler=$(xcrun --find swiftc)
+tools=${SWARSAATHI_TOOLS_ROOT:-$repo/.local/swift}
+if [ -n "${SWARSAATHI_SWIFTC:-}" ]; then
+    compiler=$SWARSAATHI_SWIFTC
+elif [ "$(uname -s)" = Darwin ]; then
+    compiler=$(xcrun --find swiftc) || {
+        echo 'Swift compiler was not found. Select an Xcode toolchain or set SWARSAATHI_SWIFTC.' >&2
+        exit 1
+    }
+elif command -v swiftc >/dev/null 2>&1; then
+    compiler=$(command -v swiftc)
 else
-    compiler=${SWARSAATHI_SWIFTC:-/workspace/.local/swift/usr/bin/swiftc}
+    compiler=$tools/usr/bin/swiftc
+fi
+compiler=$(command -v "$compiler") || {
+    echo 'Swift compiler was not found. Install Swift, run sh scripts/install_swift.sh, or set SWARSAATHI_SWIFTC.' >&2
+    exit 1
+}
+if [ ! -x "$compiler" ]; then
+    echo 'The selected Swift compiler is not executable. Check SWARSAATHI_SWIFTC or the installed toolchain.' >&2
+    exit 1
 fi
 mkdir -p "$repo/.build/replay-module-cache"
 export CLANG_MODULE_CACHE_PATH="$repo/.build/replay-module-cache"

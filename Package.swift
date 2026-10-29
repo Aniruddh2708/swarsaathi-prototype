@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "SwarSaathiPrototype",
+    name: "SwarSaathi",
     platforms: [.iOS(.v17), .macOS(.v13)],
     products: [.library(name: "SwarSaathiCore", targets: ["SwarSaathiCore"])],
     targets: [

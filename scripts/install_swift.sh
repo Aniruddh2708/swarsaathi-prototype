@@ -1,13 +1,26 @@
 #!/bin/sh
-# Reproduce the Linux test toolchain. On a Mac use Xcode's Apple toolchain.
+# Install a local Linux toolchain when Swift is not already available.
 set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+if [ -n "${SWARSAATHI_SWIFT:-}" ]; then
+    swift=$(command -v "$SWARSAATHI_SWIFT") || {
+        echo 'SWARSAATHI_SWIFT does not identify an available Swift executable.' >&2
+        exit 1
+    }
+    "$swift" --version
+    exit 0
+fi
 if [ "$(uname -s)" = Darwin ]; then
     xcrun swift --version
     exit 0
 fi
-root=${SWARSAATHI_TOOLS_ROOT:-/workspace/.local/swift}
-cache=${SWARSAATHI_DOWNLOAD_CACHE:-/workspace/.cache/swift-download}
+if command -v swift >/dev/null 2>&1; then
+    swift=$(command -v swift)
+    "$swift" --version
+    exit 0
+fi
+root=${SWARSAATHI_TOOLS_ROOT:-$repo/.local/swift}
+cache=${SWARSAATHI_DOWNLOAD_CACHE:-$repo/.cache/swift-download}
 if [ -x "$root/usr/bin/swift" ]; then
     "$root/usr/bin/swift" --version
     exit 0

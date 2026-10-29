@@ -6,4 +6,14 @@ xcuserdata/
 *.xcscmblueprint
 .DS_Store
 *.log
-!docs/evidence/*.log
+.cache/
+.local/
+artifacts/
+recordings/
+SwarSaathiReports/
+practice-*.json
+calibration-*.json
+*.mobileprovision
+*.p12
+.env
+.env.*

@@ -1,4 +1,4 @@
-name: Swift regression and iOS build
+name: Swift checks
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
         run: xcodebuild -version && swift --version
       - name: Core regression tests (Apple Accelerate path)
         run: swift test --configuration release --jobs 2
-      - name: Build iOS app for simulator
+      - name: Build application for simulator
         run: >-
           xcodebuild -project SwarSaathi.xcodeproj -scheme SwarSaathi
           -configuration Debug -destination 'generic/platform=iOS Simulator'

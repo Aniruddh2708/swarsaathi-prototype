@@ -1,46 +1,78 @@
-**SwarSaathi — shareable technology-stack description**
+# Technology Stack
 
-SwarSaathi is a native iPhone/iPad feasibility prototype for guided singing-pitch practice. It captures a single singer's voice, estimates fundamental frequency with the YIN algorithm, suggests a singer-confirmed Sa from three comfortable vowel samples independently of exercise selection, and compares live singing with a timed Alankaar. Results show overall and per-note pitch matching. Audio analysis runs on the device and does not require internet after installation.
+SwarSaathi provides guided singing practice through microphone pitch analysis,
+singer-confirmed Sa selection, timed Alankaar exercises, and per-note feedback.
+Audio processing and result storage run locally.
 
-| Layer | Technology | Role in this application |
-| --- | --- | --- |
-| Programming language | Swift | Audio-processing logic, musical calculations, application state and tests. |
-| User interface | SwiftUI | Recording screens, controls, navigation, live pitch guide and result cards. `Canvas` and `TimelineView` draw the live guide. |
-| Microphone and playback | AVFoundation | `AVAudioEngine` receives microphone samples; `AVAudioSession` manages the audio route and interruptions; `AVAudioApplication` requests permission on iOS 17+; `AVAudioPlayer` plays generated reference tones. |
-| Numerical processing | Accelerate / vDSP | Efficient sum-of-squares and dot-product operations for YIN on Apple platforms. |
-| Application services | Foundation, Dispatch | Timers, local files, JSON serialization, a processing worker, synchronization and bounded audio handoff. |
-| Timing | QuartzCore | `CACurrentMediaTime()` provides a monotonic clock for practice progression. |
-| Device integration | UIKit | Settings access, note-change haptics and keeping the display awake during practice. |
-| Development | Xcode, Swift Package Manager | Xcode builds/signs the iOS app; Swift Package Manager builds and tests the shared calculation code. |
-| Testing and source management | XCTest, Git, GitHub Actions | Regression tests, version history, macOS tests and iOS Simulator compilation. GitHub hosts source and build automation. |
-| Stored results | Local JSON files | Timestamped pitch observations, target definitions, thresholds, results and diagnostics. Reports can be shared explicitly. |
+## Technologies
 
-The architecture follows **Model–View–ViewModel (MVVM)**: SwiftUI views show information; view models coordinate recording and practice; shared models perform calculations. The implementation has no external Swift package dependencies. It targets iOS/iPadOS 17 or newer, using Swift 5 language mode and a Swift Package tools declaration of 5.9.
-
-| Calculation or design | What it does |
+| Technology | Responsibility |
 | --- | --- |
-| DC-offset removal and RMS | Centers each audio window and checks whether its signal level is sufficient for analysis. |
-| YIN fundamental-frequency estimation | Compares the waveform against delayed copies, normalizes the differences, selects a repetition period and refines it by interpolation. Frequency equals sample rate divided by period. |
-| Robust calibration statistics | Uses the median pitch, reliable-voice coverage and pitch spread to assess each low/middle/high sample. |
-| Voice-only reference suggestion | Balances recorded range center and comfortable middle without exercise inputs, then requires singer confirmation. This is a starting-point heuristic. |
-| Separate exercise availability | Checks every target at the confirmed Sa against the recorded range, including notes below Sa, without changing calibration. |
-| Musical frequency ratios | Generates Sa/Re/Ga and other targets from the confirmed Sa using illustrative Shuddha ratios. |
-| Fixed target timeline | Advances one note per beat using elapsed monotonic time, regardless of singing mistakes. |
-| Cents-based pitch comparison | Measures musical distance with `1200 × log2(observed frequency / target frequency)`. |
-| Full-exercise scoring | Scores every expected time cell, including missed notes. A separate practice metric allows brief adjacent-note transitions; the strict metric remains available. |
-| Bounded processing queues | Keep audio work off the microphone callback, limit backlog and isolate each recording from earlier recordings. |
+| Swift | Application logic, audio processing, musical calculations, and tests. |
+| SwiftUI | Recording and practice screens, navigation, live pitch visualization, and result cards. `Canvas` and `TimelineView` render the pitch guide. |
+| AVFoundation | `AVAudioEngine` captures microphone samples; `AVAudioSession` manages audio routes and interruptions; `AVAudioApplication` requests microphone access; `AVAudioPlayer` plays reference audio. |
+| Accelerate / vDSP | Vector sum-of-squares and dot-product operations used by the YIN pitch detector. |
+| Foundation | Timers, processing-thread support, file handling, dates, and JSON encoding. |
+| Dispatch | Worker coordination, synchronization, main-thread delivery, and processing-time measurement. |
+| QuartzCore | A monotonic clock for the count-in and scheduled exercise progression. |
+| UIKit | Settings access, note-change haptics, and display-awake behaviour during practice. |
+| XCTest | Automated checks for audio processing, calibration, timing, and scoring. |
+| Xcode and Swift Package Manager | Application builds and shared-core development. |
+| Git, GitHub, and GitHub Actions | Version control, source hosting, and automated build checks. |
 
-YIN is an **algorithm**, Swift is a **language**, and AVFoundation/SwiftUI are **frameworks**. Xcode is the **development environment**. This implementation uses deterministic digital signal processing; it does not use a trained neural network, a cloud inference service, a Python backend or a remote database.
+The project uses Swift 5 language mode and a Swift Package tools declaration of
+5.9. It has no external Swift package dependencies.
 
-**Verification:** application revision `38b52e1` has an executed 75-test portable regression suite, plus successful Apple core tests and an iOS Simulator build. New calibration tests processed 24 synthetic harmonic-rich, noisy, vibrato signals through the shared worker/YIN path; maximum error in the resulting sample medians was 0.672 cents. Independent fixtures verified score arithmetic and JSON replay. These results establish behavior on the specified tests; they do not establish near-perfect accuracy on real singers. Real-device singing, route behavior and end-to-end latency need separate validation.
+## Architecture
 
-**Scope:** the prototype suggests a reference Sa from voice recordings and checks exercises separately and measures pitch matching. Three vowels do not identify a unique permanent personal Sa, an entire vocal range or a raga. The score is not an overall assessment of musicianship. Exported JSON contains estimated pitch observations, not the original microphone waveform. Reference WAV audio is generated separately and stops before microphone recording.
+The application follows a Model–View–ViewModel structure. SwiftUI views present
+controls and results, view models coordinate recording and practice state, and
+shared models perform signal-processing and musical calculations.
 
-Supporting material: [beginner/evaluator guide](EVALUATOR_GUIDE.md), [complete implementation and formulas](TECHNICAL_WALKTHROUGH.md), [test evidence](evidence/clarity-core.log), and [successful Apple build for the application revision](https://github.com/Aniruddh2708/swarsaathi-prototype/actions/runs/40626528026).
+The microphone callback hands samples to a bounded buffer. A dedicated worker
+analyses overlapping windows and delivers timestamped pitch frames. Each
+recording has an isolated processing run so earlier audio cannot enter a new
+attempt. Missing audio remains missing rather than being reconstructed from
+the expected exercise.
 
+## Processing Flow
 
-October 29 update: calibration and exercise selection are now independent. The
-current core run passed **85 tests, zero failures**; see the
-[regression evidence](evidence/exercise-independence-release.log) and
-[milestone details](MILESTONES.md). The earlier 75-test results above refer to
-revision `38b52e1`; they do not validate the new suggestion policy on real singers.
+1. **Capture and prepare audio.** Receive microphone samples at the input's
+   actual sample rate. Centre each analysis window and measure RMS signal level
+   before pitch estimation.
+2. **Estimate pitch.** YIN compares the waveform with delayed copies,
+   normalizes their differences, selects a repetition period, and refines it by
+   interpolation. Frequency is the sample rate divided by the estimated period.
+3. **Confirm Sa.** Validate recorded voice samples, present a reference-pitch
+   recommendation, and require the singer's confirmation. Exercise availability
+   is checked separately at the confirmed Sa.
+4. **Schedule targets.** Generate each swar from the confirmed Sa and the
+   configured tuning ratios. A monotonic timeline advances one note per beat
+   according to the selected BPM, independently of singing performance.
+5. **Display and compare.** Draw scheduled targets alongside the microphone's
+   measured pitch. Display smoothing is separate from the raw accepted pitch
+   observations used for calibration and scoring.
+6. **Score and report.** Evaluate all scheduled notes and save the observations,
+   target timeline, thresholds, results, and processing diagnostics as JSON.
+
+## Pitch Comparison and Playback
+
+Pitch difference is calculated as:
+
+```text
+cents = 1200 × log2(observed frequency / target frequency)
+```
+
+Every scheduled note is divided into scoring cells no longer than 40 ms. The
+strict match uses a ±50-cent tolerance. The practice match additionally accepts
+adjacent-note pitches and the glide between them within 100 ms on either side
+of internal note changes. Both retain the full expected denominator; missing
+observations and wrong notes lower the score. Overall results weight each note
+equally. These percentages describe pitch matching at the guided tempo.
+
+Reference playback generates sine tones from the same target definitions and
+timing used by the graph and scorer. Short fades reduce clicks at note edges.
+Playback stops before microphone recording begins.
+
+Reports contain estimated pitch observations rather than recorded microphone
+waveforms. Analysis requires no network connection after installation.
