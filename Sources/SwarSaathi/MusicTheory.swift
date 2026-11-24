@@ -72,6 +72,28 @@ struct Alankaar {
         }
     }
 
+    /// All possible manually confirmed tonics that keep both Sa and this phrase
+    /// inside the recorded bounds. Independent of the calibration recommendation.
+    func supportedSaRange(lowerHz: Double, upperHz: Double,
+                          tuning: TuningSystem = .justShuddha) -> ClosedRange<Double>? {
+        let ratios = targets(sa: 1, tuning: tuning).map(\.ratio)
+        guard lowerHz.isFinite, upperHz.isFinite, lowerHz > 0, upperHz >= lowerHz,
+              ratios.count == labels.count, ratios.allSatisfy({ $0.isFinite && $0 > 0 }),
+              let lowest = ratios.min(), let highest = ratios.max() else { return nil }
+        let low = max(lowerHz, lowerHz / lowest), high = min(upperHz, upperHz / highest)
+        return low <= high ? low...high : nil
+    }
+
+    func rangeHint(sa: Double, lowerHz: Double, upperHz: Double) -> String? {
+        guard !fits(sa: sa, lowerHz: lowerHz, upperHz: upperHz) else { return nil }
+        guard let range = supportedSaRange(lowerHz: lowerHz, upperHz: upperHz) else {
+            return "This phrase spans more than your recorded range. Choose a shorter phrase."
+        }
+        let direction = sa > range.upperBound ? "lower" : "higher"
+        let edge = sa > range.upperBound ? range.upperBound : range.lowerBound
+        return String(format: "This phrase needs a %@ Sa (around %.1f Hz). Adjust and confirm only if comfortable.", direction, edge)
+    }
+
     /// Sa Re Ga Ma | Pa Dha Ni Sa'   /   Sa' Ni Dha Pa | Ma Ga Re Sa
     static let standard = Alankaar(name: "Basic Ascent & Descent", labels: [
         "Sa", "Re", "Ga", "Ma", "Pa", "Dha", "Ni", "Sa'",

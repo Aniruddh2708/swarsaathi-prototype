@@ -96,7 +96,7 @@ struct PitchGraphView: View {
             guard let start = sessionStart, let hz = p.hz,
                   p.t >= start, p.t <= start + duration else { prev = nil; continue }
             let pt = CGPoint(x: xPos(p.t - start), y: yPos(hz))
-            if let pr = prev, p.t - pr.t < 0.25 { path.addLine(to: pt) } else { path.move(to: pt) }
+            if let pr = prev, !p.startsNewSegment, p.t > pr.t, p.t - pr.t < 0.25 { path.addLine(to: pt) } else { path.move(to: pt) }
             prev = p
         }
         data.stroke(path, with: .color(.swarBlue),

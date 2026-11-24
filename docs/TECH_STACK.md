@@ -65,14 +65,14 @@ cents = 1200 × log2(observed frequency / target frequency)
 
 Every scheduled note is divided into scoring cells no longer than 40 ms. The
 strict match uses a ±50-cent tolerance. The practice match additionally accepts
-adjacent-note pitches and the glide between them within 100 ms on either side
-of internal note changes. Both retain the full expected denominator; missing
+adjacent-note pitches and the glide between them within one tenth of a beat,
+capped at 100 ms, on each side of an internal note change. Both retain the full expected denominator; missing
 observations and wrong notes lower the score. Overall results weight each note
 equally. These percentages describe pitch matching at the guided tempo.
 
 Reference playback generates sine tones from the same target definitions and
 timing used by the graph and scorer. Short fades reduce clicks at note edges.
-Playback stops before microphone recording begins.
+WAV generation runs on a cancellable background queue. Playback stops before microphone recording begins.
 
 Reports contain estimated pitch observations rather than recorded microphone
 waveforms. Analysis requires no network connection after installation.

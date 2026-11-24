@@ -14,6 +14,14 @@ final class ExerciseRangeTests: XCTestCase {
         XCTAssertEqual(paPhrase.targets(sa: sa, tuning: .justShuddha)[2].frequency, 330)
     }
 
+    func testManualRangeGuidanceDistinguishesAdjustmentFromInsufficientSpan() throws {
+        let range = try XCTUnwrap(Alankaar.standard.supportedSaRange(lowerHz: 130, upperHz: 310))
+        XCTAssertEqual(range, 130...155)
+        XCTAssertTrue(Alankaar.standard.fits(sa: range.upperBound, lowerHz: 130, upperHz: 310))
+        XCTAssertNil(Alankaar.standard.supportedSaRange(lowerHz: 200, upperHz: 310))
+        XCTAssertNil(Alankaar.fiveNote.rangeHint(sa: 220, lowerHz: 130, upperHz: 310))
+    }
+
     func testNotesBelowSaAreAlsoChecked() {
         let tuning = TuningSystem(name: "Lower-register test", swars: [Swar(label: "Sa", ratio: 1), Swar(label: "Lower Pa", ratio: 0.75)])
         let phrase = Alankaar(name: "Lower phrase", labels: ["Sa", "Lower Pa", "Sa"])

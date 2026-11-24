@@ -4,6 +4,7 @@ struct GraphPoint {
     let t: Double
     let hz: Double?
     let targetHz: Double
+    var startsNewSegment = false
 }
 
 struct LadderLine {
@@ -30,6 +31,7 @@ struct NoteResult: Identifiable, Codable {
     let correctFrames: Int
     let transitionAcceptedFrames: Int
     let practiceMatchPercent: Double
+    var observedCells: Int? = nil // includes captured cells without reliable pitch
     var id: Int { index }
 }
 
@@ -78,11 +80,15 @@ struct TimedPracticeNote: Codable {
 struct PracticeTimeline: Codable {
     let notes: [TimedPracticeNote]
     let bpm: Double
+    // Older exported timelines omit this field and replay with their original policy.
+    private enum TransitionPolicy: String, Codable { case cappedTenthBeat }
+    private let transitionPolicy: TransitionPolicy?
     var duration: Double { notes.last?.end ?? 0 }
 
     init(targets: [NoteTarget], bpm: Double = 72) {
         precondition(!targets.isEmpty && targets.allSatisfy { $0.frequency.isFinite && $0.frequency > 0 })
         precondition(bpm.isFinite && (40...120).contains(bpm))
+        transitionPolicy = .cappedTenthBeat
         self.bpm = bpm
         let beat = 60 / bpm
         self.notes = targets.enumerated().map { index, target in
@@ -90,7 +96,7 @@ struct PracticeTimeline: Codable {
         }
     }
 
-    var transitionWindowSeconds: Double { min(0.1, 0.2 * 60 / bpm) }
+    var transitionWindowSeconds: Double { min(0.1, (transitionPolicy == nil ? 0.2 : 0.1) * 60 / bpm) }
 
     /// Additional practice metric; strict accuracy remains separately reported.
     func matchesForPractice(_ observation: PracticeObservation,
@@ -114,6 +120,11 @@ struct PracticeTimeline: Codable {
     func note(at elapsed: Double) -> TimedPracticeNote? {
         guard elapsed.isFinite && elapsed >= 0 && elapsed < duration else { return nil }
         let index = min(Int(elapsed * bpm / 60), notes.count - 1)
+        if transitionPolicy == nil { return notes[index] } // historical report replay
+        // The floating-point inverse of start = index * beat can round one
+        // note early/late. Use the stored boundary as the final authority.
+        if elapsed < notes[index].start { return notes[max(0, index - 1)] }
+        if elapsed >= notes[index].end { return notes[min(index + 1, notes.count - 1)] }
         return notes[index]
     }
 
@@ -162,7 +173,8 @@ struct PracticeTimeline: Codable {
                               accuracyPercent: 100 * Double(correct) / Double(count),
                               expectedFrames: count, voicedFrames: voiced.count, correctFrames: correct,
                               transitionAcceptedFrames: practiceMatches - correct,
-                              practiceMatchPercent: 100 * Double(practiceMatches) / Double(count))
+                              practiceMatchPercent: 100 * Double(practiceMatches) / Double(count),
+                              observedCells: selected.count)
         }
         let totalEligible = results.reduce(0) { $0 + $1.eligibleDuration }
         let totalVoiced = results.reduce(0) { $0 + $1.voicedDuration }
@@ -174,7 +186,7 @@ struct PracticeTimeline: Codable {
             "Illustrative Shuddha ratios; experimental 25/50-cent thresholds are not a validated Hindustani assessment.",
             "The percentage is singing pitch-match coverage for the full expected exercise, not detector confidence."
         ]
-        limitations.append("Practice match allows adjacent-note pitches and glides within 100 ms either side of internal changes. Strict timed match is retained separately. Silence and wrong octaves still reduce both scores; sustained-note tolerance stays ±50 cents.")
+        limitations.append("Practice match allows adjacent-note pitches and glides within \(Int((1000 * transitionWindowSeconds).rounded())) ms either side of internal changes. Strict timed match is retained separately. Silence and wrong octaves still reduce both scores; sustained-note tolerance stays ±50 cents.")
         if totalVoiced < 0.8 * totalEligible { limitations.append("Incomplete reliable voice coverage: silence, rejected pitch or dropped acquisition decreases the score.") }
         if mismatch { limitations.append("Pitch or timing mismatch detected; alignment confidence is limited.") }
         return (PracticeSummary(total: notes.count, attempted: attempted, onTarget: onTarget,
@@ -191,9 +203,15 @@ struct PracticeTimeline: Codable {
 /// Pure synthesis from the same timeline consumed by graph and scorer.
 enum ReferenceSynthesis {
     static func samples(timeline: PracticeTimeline, sampleRate: Double = 44100) -> [Float] {
+        samples(timeline: timeline, sampleRate: sampleRate, shouldContinue: { true })!
+    }
+
+    private static func samples(timeline: PracticeTimeline, sampleRate: Double,
+                                shouldContinue: () -> Bool) -> [Float]? {
         precondition(sampleRate.isFinite && sampleRate >= 8000)
         var output = [Float](repeating: 0, count: Int((timeline.duration * sampleRate).rounded()))
         for note in timeline.notes {
+            guard shouldContinue() else { return nil }
             precondition(note.target.frequency < sampleRate / 2)
             let first = Int((note.start * sampleRate).rounded())
             let last = min(output.count, Int((note.end * sampleRate).rounded()))
@@ -207,7 +225,13 @@ enum ReferenceSynthesis {
     }
 
     static func wav(timeline: PracticeTimeline, sampleRate: Int = 44100) -> Data {
-        let samples = samples(timeline: timeline, sampleRate: Double(sampleRate))
+        wav(timeline: timeline, sampleRate: sampleRate, shouldContinue: { true })!
+    }
+
+    static func wav(timeline: PracticeTimeline, sampleRate: Int = 44100, shouldContinue: () -> Bool) -> Data? {
+        guard shouldContinue(),
+              let samples = samples(timeline: timeline, sampleRate: Double(sampleRate), shouldContinue: shouldContinue)
+        else { return nil }
         var output = Data()
         func ascii(_ text: String) { output.append(text.data(using: .ascii)!) }
         func u16(_ value: UInt16) { var le = value.littleEndian; withUnsafeBytes(of: &le) { output.append(contentsOf: $0) } }
@@ -215,7 +239,20 @@ enum ReferenceSynthesis {
         ascii("RIFF"); u32(UInt32(36 + samples.count * 2)); ascii("WAVEfmt "); u32(16)
         u16(1); u16(1); u32(UInt32(sampleRate)); u32(UInt32(sampleRate * 2)); u16(2); u16(16)
         ascii("data"); u32(UInt32(samples.count * 2))
-        for sample in samples { u16(UInt16(bitPattern: Int16((max(-1, min(1, sample)) * 32767).rounded()))) }
+        let headerSize = output.count
+        output.count += samples.count * 2
+        let completed = output.withUnsafeMutableBytes { (bytes: UnsafeMutableRawBufferPointer) -> Bool in
+            for offset in stride(from: 0, to: samples.count, by: 4096) {
+                guard shouldContinue() else { return false }
+                for i in offset..<min(offset + 4096, samples.count) {
+                    let sample = UInt16(bitPattern: Int16((max(-1, min(1, samples[i])) * 32767).rounded()))
+                    bytes[headerSize + 2 * i] = UInt8(truncatingIfNeeded: sample)
+                    bytes[headerSize + 2 * i + 1] = UInt8(sample >> 8)
+                }
+            }
+            return true
+        }
+        guard completed else { return nil }
         return output
     }
 }

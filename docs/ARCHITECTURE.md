@@ -36,11 +36,18 @@ node negotiate the tap format.
 
 The callback copies samples to a preallocated, bounded mailbox and signals a
 processing worker. Each recording has its own generation identifier. Stopping
-invalidates deliveries from that generation so stale frames cannot enter a new
-attempt. Packet discontinuities reset pending audio rather than joining samples
-across missing intervals.
+closes that generation. A completed exercise waits for audio covering its final
+analysis window, then drains admitted packets on the worker before scoring.
+A missing tail, lost packet, format fault, or drain timeout marks the capture
+incomplete. Calibration asks for another take when capture is damaged.
 
-The default analysis window contains 2,048 samples with a 1,024-sample hop.
+Hardware sample positions track continuity. Host timestamps anchor positions to
+the exercise clock. A position gap breaks the analysis window and graph. When
+positions are unavailable, the worker uses sample counts between host anchors
+with a small jitter allowance. Reports count packets with estimated timing.
+Callback arrivals alone cannot establish the precise time of an acoustic event.
+
+At 44.1 and 48 kHz the analysis window contains 2,048 samples with a 1,024-sample hop. Other supported capture rates size the hop for an interval of at most 25 ms and the window for the pitch search range.
 Each window is centred by subtracting its mean. RMS measures its signal level;
 quiet or invalid input produces no accepted pitch estimate.
 
@@ -49,7 +56,7 @@ quiet or invalid input produces no accepted pitch estimate.
 `YINPitchDetector` compares the waveform with delayed copies using a
 constant-length difference calculation. Accelerate/vDSP supplies vector
 sum-of-squares and dot products. The normalized difference is searched for the
-first suitable local minimum, then refined with parabolic interpolation.
+first suitable local minimum. A substantially better period near twice that lag can resolve a dominant second harmonic. Parabolic interpolation refines the estimate. For uncertain windows, fitted 50/60 Hz energy can trigger a second YIN pass after a symmetric difference filter. When the two passes disagree by more than half an octave, a third estimate after subtracting the fitted mains tone must corroborate the selected register. Every pass applies a signal-level gate and the same acceptance confidence.
 
 ```text
 frequency = sample rate / estimated period in samples
@@ -104,8 +111,9 @@ preferring a successful or reliable observation. Missing or unreliable cells
 receive zero credit.
 
 Strict matching uses a ±50-cent tolerance. The practice metric additionally
-accepts adjacent-note pitches and the intervening glide within 100 milliseconds
-either side of internal note changes. Sustained-note tolerance is unchanged,
+accepts adjacent-note pitches and the intervening glide within 10% of a beat,
+capped at 100 milliseconds, either side of internal note changes. A saved policy
+identifies the rule for replay. Earlier exports retain their original allowance. Sustained-note tolerance is unchanged,
 and no extra allowance is applied at the exercise's start or end.
 
 ```text
@@ -120,7 +128,7 @@ matching at the selected tempo. Timing and pitch deviations can both affect it.
 
 `ReferenceSynthesis` generates a mono sine-wave melody from the target timeline,
 with short fades to avoid abrupt waveform edges. The samples are encoded as
-PCM WAV and played by `ReferencePlayer`. Reference playback stops before
+PCM WAV on a cancellable background queue and played by `ReferencePlayer`. Reference playback stops before
 microphone recording begins.
 
 ## Reports

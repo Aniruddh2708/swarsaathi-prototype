@@ -48,6 +48,8 @@ final class ScaleViewModel: ObservableObject {
     private var summaries: [Test: CalibrationSample] = [:]
     private var measuredFrames: [Test: [CalibrationObservation]] = [:]
     private var measuredDurations: [Test: Double] = [:]
+    private var captureDiagnostics: [Test: PitchEngineDiagnostics] = [:]
+    private var captureRoutes: [Test: CaptureRoute] = [:]
     private var missCount = 0
     private let engine: PitchEngine
     private let reference = ReferencePlayer()
@@ -115,6 +117,8 @@ final class ScaleViewModel: ObservableObject {
             self.summaries.removeValue(forKey: test)
             self.measuredFrames.removeValue(forKey: test)
             self.measuredDurations.removeValue(forKey: test)
+            self.captureDiagnostics.removeValue(forKey: test)
+            self.captureRoutes.removeValue(forKey: test)
             self.missCount = 0
             self.liveFrequency = nil
             self.engine.onFrame = { [weak self] frame in
@@ -160,18 +164,13 @@ final class ScaleViewModel: ObservableObject {
     }
 
     private func handle(_ status: EngineStatus) {
+        guard activeTest != nil else { return }
+        let detail: String
         switch status {
-        case .interrupted:
-            stopIfNeeded(markInactive: false)
-            errorMessage = "Recording was interrupted. Please record this sample again."
-        case .resumed:
-            stopIfNeeded(markInactive: false)
-            errorMessage = "Your microphone changed. Please record this sample again."
-        case .failed(let m):
-            stopIfNeeded(markInactive: false)
-            NSLog("Calibration microphone failed: %@", m)
-            errorMessage = "Recording stopped. Check your microphone and try again."
+        case .interrupted: detail = "Audio interrupted or input route changed."
+        case .failed(let message): detail = message
         }
+        finishRecording(sample: nil, rejection: detail, recordingEnd: CACurrentMediaTime(), captureFault: true)
     }
 
     private func stopAndSave() { evaluateRecording(manualStop: true) }
@@ -192,7 +191,7 @@ final class ScaleViewModel: ObservableObject {
         }
     }
 
-    private func finishRecording(sample: CalibrationSample?, rejection: String?, recordingEnd: Double) {
+    private func finishRecording(sample: CalibrationSample?, rejection: String?, recordingEnd: Double, captureFault: Bool = false) {
         guard let test = activeTest else { return }
         recordingTimer?.invalidate()
         recordingTimer = nil
@@ -201,8 +200,16 @@ final class ScaleViewModel: ObservableObject {
         liveFrequency = nil
         level = 0
         recordingStatus = ""
+        let diagnostics = engine.diagnostics
+        captureDiagnostics[test] = diagnostics
+        captureRoutes[test] = engine.captureRoute
         measuredFrames[test] = samples
         measuredDurations[test] = recordingEnd - recordingStart
+        if captureFault || diagnostics.hasCaptureLoss {
+            errorMessage = "Recording was interrupted. Check your microphone and record this note again."
+            saveAudit(status: rejection ?? "Capture gap during calibration.")
+            return
+        }
         guard let sample = sample else {
             let detail = rejection ?? "No reliable calibration sample was measured."
             errorMessage = "We couldn’t get a steady note. Please record this sample again."
@@ -255,17 +262,14 @@ final class ScaleViewModel: ObservableObject {
         let frequency = proposal.saHz
         let generation = permissionGeneration
         isReferencePlaying = true
-        do {
-            try reference.playSa(hz: frequency) { [weak self] completed in
-                guard let self = self, self.screenActive, self.permissionGeneration == generation else { return }
-                self.isReferencePlaying = false
-                self.calibration.referenceFinished(hz: frequency, successful: completed)
-                if !completed { NSLog("Optional Sa reference playback stopped before completion") }
-            }
-        } catch {
-            isReferencePlaying = false
+        reference.playSa(hz: frequency, onError: { [weak self] error in
             NSLog("Sa playback failed: %@", error.localizedDescription)
-            errorMessage = "Couldn’t play the note. Check your sound output and try again."
+            self?.errorMessage = "Couldn’t play the note. Check your sound output and try again."
+        }) { [weak self] completed in
+            guard let self = self, self.screenActive, self.permissionGeneration == generation else { return }
+            self.isReferencePlaying = false
+            self.calibration.referenceFinished(hz: frequency, successful: completed)
+            if !completed { NSLog("Optional Sa reference playback stopped before completion") }
         }
     }
 
@@ -295,6 +299,8 @@ final class ScaleViewModel: ObservableObject {
         samples.removeAll()
         measuredFrames.removeAll()
         measuredDurations.removeAll()
+        captureDiagnostics.removeAll()
+        captureRoutes.removeAll()
         sa = 0
         errorMessage = nil
         auditURL = nil
@@ -332,6 +338,8 @@ final class ScaleViewModel: ObservableObject {
             let status: String
             let observations: [String: [CalibrationObservation]]
             let samples: [String: CalibrationSample]
+            let capture: [String: PitchEngineDiagnostics]
+            let routes: [String: CaptureRoute]
             let recordingDurations: [String: Double]
             let recommendation: SaRecommendation?
             let confirmedSa: Double?
@@ -343,7 +351,10 @@ final class ScaleViewModel: ObservableObject {
             let rows = Dictionary(uniqueKeysWithValues: measuredFrames.map { ($0.key.title, $0.value) })
             let stats = Dictionary(uniqueKeysWithValues: summaries.map { ($0.key.title, $0.value) })
             let durations = Dictionary(uniqueKeysWithValues: measuredDurations.map { ($0.key.title, $0.value) })
-            let audit = Audit(schemaVersion: 2, created: Date(), status: status, observations: rows, samples: stats, recordingDurations: durations,
+            let audit = Audit(schemaVersion: 3, created: Date(), status: status, observations: rows, samples: stats,
+                              capture: Dictionary(uniqueKeysWithValues: captureDiagnostics.map { ($0.key.title, $0.value) }),
+                              routes: Dictionary(uniqueKeysWithValues: captureRoutes.map { ($0.key.title, $0.value) }),
+                              recordingDurations: durations,
                               recommendation: recommendation, confirmedSa: calibration.confirmedSa)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

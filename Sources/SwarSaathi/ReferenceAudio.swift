@@ -8,10 +8,14 @@ final class ReferencePlayer: NSObject, AVAudioPlayerDelegate {
     private var player: AVAudioPlayer?
     private var completion: ((Bool) -> Void)?
     private var observers: [NSObjectProtocol] = []
-    var isPlaying: Bool { player?.isPlaying ?? false }
+    private let synthesisQueue = OperationQueue()
+    private var request = UUID()
+    private var ownsSession = false
 
     override init() {
         super.init()
+        synthesisQueue.maxConcurrentOperationCount = 1
+        synthesisQueue.qualityOfService = .userInitiated
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification,
                                             object: nil, queue: .main) { [weak self] notification in
@@ -30,45 +34,70 @@ final class ReferencePlayer: NSObject, AVAudioPlayerDelegate {
 
     deinit {
         observers.forEach { NotificationCenter.default.removeObserver($0) }
+        synthesisQueue.cancelAllOperations()
         player?.stop()
     }
 
-    func play(timeline: PracticeTimeline, completion: @escaping (Bool) -> Void) throws {
+    func play(timeline: PracticeTimeline, onError: @escaping (Error) -> Void,
+              completion: @escaping (Bool) -> Void) {
         stop()
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .default)
-        try session.setActive(true)
-        let newPlayer = try AVAudioPlayer(data: ReferenceSynthesis.wav(timeline: timeline))
-        newPlayer.delegate = self
-        newPlayer.prepareToPlay()
-        guard newPlayer.play() else { throw NSError(domain: "SwarSaathi.Reference", code: 1, userInfo: [NSLocalizedDescriptionKey: "Reference playback could not start. Check the output device."]) }
         self.completion = completion
-        self.player = newPlayer
+        let ticket = request
+        let operation = BlockOperation()
+        operation.addExecutionBlock { [weak self, weak operation] in
+            guard let operation, !operation.isCancelled,
+                  let wav = ReferenceSynthesis.wav(timeline: timeline, shouldContinue: { !operation.isCancelled }) else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.request == ticket else { return }
+                do {
+                    let session = AVAudioSession.sharedInstance()
+                    try session.setCategory(.playback, mode: .default)
+                    try session.setActive(true)
+                    self.ownsSession = true
+                    let player = try AVAudioPlayer(data: wav)
+                    player.delegate = self
+                    guard player.prepareToPlay(), player.play() else {
+                        throw NSError(domain: "SwarSaathi.Reference", code: 1)
+                    }
+                    self.player = player
+                } catch {
+                    self.stop()
+                    onError(error)
+                }
+            }
+        }
+        synthesisQueue.addOperation(operation)
     }
 
-    func playSa(hz: Double, completion: @escaping (Bool) -> Void) throws {
+    func playSa(hz: Double, onError: @escaping (Error) -> Void, completion: @escaping (Bool) -> Void) {
         let note = NoteTarget(index: 0, label: "Sa", ratio: 1, frequency: hz)
-        try play(timeline: PracticeTimeline(targets: [note], bpm: 40), completion: completion)
+        play(timeline: PracticeTimeline(targets: [note], bpm: 40), onError: onError, completion: completion)
     }
 
-    func stop() {
-        player?.stop(); player?.delegate = nil; player = nil
+    private func endPlayback(completed: Bool) {
+        request = UUID()
+        synthesisQueue.cancelAllOperations()
+        player?.delegate = nil
+        player?.stop()
+        player = nil
+        if ownsSession {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            ownsSession = false
+        }
         let callback = completion; completion = nil
-        callback?(false)
+        callback?(completed)
     }
+
+    func stop() { endPlayback(completed: false) }
 
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         guard player === self.player else { return }
-        self.player = nil
-        let callback = completion; completion = nil
-        callback?(flag)
+        endPlayback(completed: flag)
     }
 
     func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
         guard player === self.player else { return }
-        self.player = nil
-        let callback = completion; completion = nil
-        callback?(false)
+        endPlayback(completed: false)
     }
 }
 #endif

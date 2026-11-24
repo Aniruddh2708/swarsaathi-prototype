@@ -98,6 +98,12 @@ struct ScaleDiscoveryView: View {
                                                 startPoint: .leading, endPoint: .trailing))
             Text("Confirm if this feels comfortable for you.")
                 .font(.subheadline).foregroundColor(.secondary)
+            if let proposal = vm.recommendation {
+                let available = Alankaar.demoExercises.filter { $0.fits(sa: vm.sa, lowerHz: proposal.lowerHz, upperHz: proposal.upperHz) }
+                Text(available.isEmpty ? "No available exercise fits this Sa within your recorded range. You can adjust Sa below."
+                     : "Fits your recorded range: " + available.map(\.name).joined(separator: " · "))
+                    .font(.footnote).foregroundColor(.secondary)
+            }
             Button(vm.isReferencePlaying ? "Stop reference" : "Listen to Sa (optional)") {
                 if vm.isReferencePlaying { vm.stopReference() } else { vm.playReference() }
             }

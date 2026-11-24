@@ -183,6 +183,16 @@ final class PracticeTimelineTests: XCTestCase {
         XCTAssertEqual(String(data: wav[8..<12], encoding: .ascii), "WAVE")
     }
 
+    func testCancellingReferenceRenderStopsBeforeReturningPlayableBytes() {
+        var calls = 0
+        let data = ReferenceSynthesis.wav(timeline: timeline()) {
+            calls += 1
+            return calls < 3
+        }
+        XCTAssertNil(data)
+        XCTAssertEqual(calls, 3)
+    }
+
     func testJSONReportEncodesRawObservationAndEveryExpectedNote() throws {
         let report = timeline().score(observations: track(missing: [1]))
         let encoded = try JSONEncoder().encode(report.results)

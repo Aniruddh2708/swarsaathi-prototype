@@ -20,8 +20,15 @@ enum PitchEngineError: LocalizedError {
 
 enum EngineStatus {
     case interrupted
-    case resumed
     case failed(String)
+}
+
+struct CaptureRoute: Codable {
+    let inputTypes: [String]
+    let sampleRate: Double
+    let channels: Int
+    let reportedInputLatencyMs: Double
+    let ioBufferDurationMs: Double
 }
 
 /// Preserves AVAudioEngine/session ownership; one bounded worker per recording.
@@ -30,13 +37,15 @@ final class PitchEngine {
     var onFrame: ((PitchFrame) -> Void)?       // main thread
     var onStatus: ((EngineStatus) -> Void)?    // main thread
 
-    private let engine = AVAudioEngine()
-    private var config = PitchConfig()
+    private var engine = AVAudioEngine()
+    private var engineObserver: NSObjectProtocol?
+    private var activeInputIDs: [String] = []
     private var activeRun: AudioProcessingRun?
     private var lastRun: AudioProcessingRun?
     private var generation: UInt64 = 0
     private var deliveryTimer: Timer?
     private var tapInstalled = false
+    private(set) var captureRoute: CaptureRoute?
 
     var diagnostics: PitchEngineDiagnostics {
         (activeRun ?? lastRun ?? AudioProcessingRun(generation: 0, sampleRate: 44100)).diagnostics
@@ -51,13 +60,13 @@ final class PitchEngine {
                                         object: nil, queue: .main) { [weak self] n in
             self?.handleInterruption(n)
         })
-        observers.append(nc.addObserver(forName: .AVAudioEngineConfigurationChange,
-                                        object: engine, queue: .main) { [weak self] _ in
-            self?.handleConfigurationChange()
-        })
+        observeEngine()
         observers.append(nc.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification,
                                         object: nil, queue: .main) { [weak self] _ in
-            self?.handleConfigurationChange()
+            guard let self else { return }
+            self.interrupt(.interrupted)
+            self.engine = AVAudioEngine()
+            self.observeEngine()
         })
         observers.append(nc.addObserver(forName: AVAudioSession.routeChangeNotification,
                                         object: nil, queue: .main) { [weak self] n in
@@ -68,7 +77,18 @@ final class PitchEngine {
         })
     }
 
+    private func observeEngine() {
+        let center = NotificationCenter.default
+        if let engineObserver { center.removeObserver(engineObserver) }
+        engineObserver = center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine,
+                                           queue: .main) { [weak self, weak observed = engine] _ in
+            guard let self, self.engine === observed else { return }
+            self.handleConfigurationChange()
+        }
+    }
+
     deinit {
+        if let engineObserver { NotificationCenter.default.removeObserver(engineObserver) }
         observers.forEach { NotificationCenter.default.removeObserver($0) }
         deliveryTimer?.invalidate()
         if tapInstalled { engine.inputNode.removeTap(onBus: 0) }
@@ -128,7 +148,7 @@ final class PitchEngine {
         guard !engine.isRunning else { return }
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(.record, mode: .measurement, options: [])
+            try session.setCategory(.record, mode: .measurement, options: [.allowBluetooth])
             try session.setActive(true, options: [])
         } catch {
             throw PitchEngineError.session(error.localizedDescription)
@@ -140,8 +160,12 @@ final class PitchEngine {
         guard format.sampleRate > 0, format.channelCount > 0 else { throw PitchEngineError.badFormat }
 
         generation &+= 1
-        let run = AudioProcessingRun(generation: generation, sampleRate: format.sampleRate, config: config)
+        let run = AudioProcessingRun(generation: generation, sampleRate: format.sampleRate)
         if let error = run.configurationError { throw PitchEngineError.engine(error) }
+        activeInputIDs = session.currentRoute.inputs.map(\.uid)
+        captureRoute = CaptureRoute(inputTypes: session.currentRoute.inputs.map { $0.portType.rawValue },
+            sampleRate: format.sampleRate, channels: Int(format.channelCount),
+            reportedInputLatencyMs: session.inputLatency * 1000, ioBufferDurationMs: session.ioBufferDuration * 1000)
         activeRun = run
         lastRun = run
         run.start()
@@ -151,15 +175,19 @@ final class PitchEngine {
         input.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, when in
             // Never interpret a new route's samples using the old YIN rate.
             // Route/configuration notifications terminate this recording.
-            guard buffer.format.sampleRate == run.sampleRate else { return }
-            guard let channels = buffer.floatChannelData else { return }
+            guard buffer.format.sampleRate == run.sampleRate,
+                  buffer.format.channelCount > 0,
+                  !buffer.format.isInterleaved || buffer.format.channelCount == 1,
+                  let channels = buffer.floatChannelData else { run.rejectFormat(); return }
+            guard buffer.frameLength > 0 else { return }
             let n = Int(buffer.frameLength)
             // AVAudioTime host timestamps and CACurrentMediaTime use the same
             // monotonic host clock. Timestamp the captured window, not DSP end.
             let fallback = !when.isHostTimeValid
             let time = fallback ? CACurrentMediaTime() - Double(n) / format.sampleRate
                                 : AVAudioTime.seconds(forHostTime: when.hostTime)
-            run.enqueue(channels[0], count: n, time: time, usedTimestampFallback: fallback)
+            run.enqueue(channels[0], count: n, time: time, usedTimestampFallback: fallback,
+                        samplePosition: when.isSampleTimeValid && when.sampleRate == run.sampleRate ? when.sampleTime : nil)
         }
         tapInstalled = true
         engine.prepare()
@@ -172,7 +200,13 @@ final class PitchEngine {
         }
         let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self, weak run] _ in
             guard let self = self, let run = run, self.activeRun === run else { return }
-            for frame in run.delivery.drain() {
+            if let fault = run.captureFault(now: ProcessInfo.processInfo.systemUptime) {
+                self.interrupt(.failed(fault))
+                return
+            }
+            let frames = run.delivery.drain()
+            run.recordDelivery(frames, now: CACurrentMediaTime())
+            for frame in frames {
                 guard self.activeRun === run else { break }
                 self.onFrame?(frame)
             }
@@ -180,11 +214,11 @@ final class PitchEngine {
         deliveryTimer = timer
         RunLoop.main.add(timer, forMode: .common)
         NSLog("Capture start generation %llu, %.0f Hz, window %d, hop %d, route %@",
-              generation, format.sampleRate, config.frameSize, config.hopSize,
+              generation, format.sampleRate, run.config.frameSize, run.config.hopSize,
               session.currentRoute.inputs.map { $0.portName }.joined(separator: ", "))
     }
 
-    private func stopEngineOnly() {
+    private func detachCapture() -> AudioProcessingRun? {
         deliveryTimer?.invalidate()
         deliveryTimer = nil
         let run = activeRun
@@ -194,6 +228,32 @@ final class PitchEngine {
             tapInstalled = false
         }
         engine.stop()
+        return run
+    }
+
+    func hasAudioForFinalWindow(endingAt end: Double) -> Bool {
+        activeRun?.hasAudioForFinalWindow(endingAt: end) ?? false
+    }
+
+    // Freeze admission before draining. The main thread stays available while
+    // the isolated worker finishes the bounded queue for this attempt.
+    func finishCapture(_ completion: @escaping ([PitchFrame], PitchEngineDiagnostics) -> Void) {
+        wantsRunning = false
+        let run = detachCapture()
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        guard let run else { completion([], diagnostics); return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = run.stop(drainPending: true)
+            let frames = run.delivery.drain()
+            DispatchQueue.main.async {
+                run.recordDelivery(frames, now: CACurrentMediaTime())
+                completion(frames, run.diagnostics)
+            }
+        }
+    }
+
+    private func stopEngineOnly() {
+        let run = detachCapture()
         if let run = run {
             let joined = run.stop()
             let stats = run.diagnostics
@@ -209,35 +269,23 @@ final class PitchEngine {
     private func handleInterruption(_ n: Notification) {
         guard let raw = n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
-        switch type {
-        case .began:
-            if wantsRunning {
-                stopEngineOnly()
-                onStatus?(.interrupted)
-            }
-        case .ended:
-            if wantsRunning { restart() }
-        @unknown default:
-            break
-        }
+        if type == .began { interrupt(.interrupted) }
     }
 
     private func handleConfigurationChange() {
-        // Route change (headphones, Bluetooth) or media services reset.
-        guard wantsRunning else { return }
+        guard let run = activeRun, wantsRunning else { return }
+        let session = AVAudioSession.sharedInstance()
+        let sameInput = session.currentRoute.inputs.map(\.uid) == activeInputIDs
+        let current = engine.inputNode.inputFormat(forBus: 0)
+        if engine.isRunning && sameInput && current.sampleRate == run.sampleRate &&
+            Int(current.channelCount) == captureRoute?.channels { return }
+        interrupt(.interrupted)
+    }
+
+    private func interrupt(_ status: EngineStatus) {
+        guard wantsRunning, let run = activeRun else { return }
         wantsRunning = false
-        stopEngineOnly()
-        onStatus?(.interrupted)
+        onStatus?(status)
+        if activeRun === run { stop() }
     }
-
-    private func restart() {
-        do {
-            try startEngine()
-            onStatus?(.resumed)
-        } catch {
-            wantsRunning = false
-            onStatus?(.failed(error.localizedDescription))
-        }
-    }
-
 }

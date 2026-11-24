@@ -60,6 +60,17 @@ final class PitchDetectorTests: XCTestCase {
         XCTAssertLessThan(abs(PitchMath.cents(detected: high.frequency, expected: low.frequency) - 1200), 1)
     }
 
+    func testDisplayFollowsTwoConsistentNewPitchesAndIgnoresOneOctaveBlip() {
+        var smoother = PitchSmoother()
+        for _ in 0..<5 { _ = smoother.process(220) }
+        XCTAssertEqual(smoother.process(440) ?? 0, 220, accuracy: 0.001)
+        XCTAssertEqual(smoother.process(220) ?? 0, 220, accuracy: 0.001)
+        _ = smoother.process(440)
+        XCTAssertEqual(smoother.process(440) ?? 0, 440, accuracy: 0.001)
+        _ = smoother.process(392)
+        XCTAssertEqual(smoother.process(392) ?? 0, 392, accuracy: 0.001)
+    }
+
     func testSmootherDoesNotBridgeUnvoicedFrame() {
         var smoother = PitchSmoother()
         for _ in 0..<5 { _ = smoother.process(220) }
@@ -99,6 +110,90 @@ final class PitchDetectorTests: XCTestCase {
         XCTAssertNil(detector.analyze(Array(repeating: 0.4, count: 2048)).rawFrequency)
         XCTAssertNil(detector.analyze(tone(220, amplitude: 0.0003).map { $0 + 0.4 }).rawFrequency)
         XCTAssertNil(detector.analyze(Array(repeating: 0, count: 2048)).rawFrequency)
+    }
+
+    func testPitchedTonesWithMainsRumbleAndRumbleAlone() {
+        var accepted = 0
+        var worstError = 0.0
+        for rate in [44100.0, 48000.0] {
+            let detector = YINPitchDetector(sampleRate: rate, config: PitchConfig())
+            for hum in [50.0, 60.0] {
+                for hz in [130.8, 196.0] {
+                    for phase in [0.0, 0.7, 1.8, 3.4] {
+                        let signal = (0..<2048).map { index -> Float in
+                            let t = Double(index) / rate
+                            return Float(0.25 * sin(2 * .pi * hz * t) + 0.125 * sin(2 * .pi * hum * t + phase))
+                        }
+                        if let detected = detector.analyze(signal).rawFrequency {
+                            let error = abs(PitchMath.cents(detected: detected, expected: hz))
+                            worstError = max(worstError, error)
+                            if error <= 15 { accepted += 1 }
+                        }
+                    }
+                }
+                XCTAssertNil(detector.analyze(tone(hum, rate: rate)).rawFrequency)
+            }
+        }
+        print("RUMBLE within15=\(accepted)/32 maxDetectedErrorCents=\(worstError)")
+        XCTAssertEqual(accepted, 32)
+    }
+
+    func testWeakFundamentalWithDominantSecondHarmonic() throws {
+        for rate in [44100.0, 48000.0] {
+            let detector = YINPitchDetector(sampleRate: rate, config: PitchConfig())
+            for hz in [110.0, 196.0, 330.0] {
+                let signal = zip(tone(hz, rate: rate, amplitude: 0.045),
+                                 tone(2 * hz, rate: rate)).map(+)
+                let actual = try XCTUnwrap(detector.analyze(signal).rawFrequency)
+                XCTAssertLessThan(abs(PitchMath.cents(detected: actual, expected: hz)), 10)
+                let upper = try XCTUnwrap(detector.analyze(tone(2 * hz, rate: rate)).rawFrequency)
+                XCTAssertLessThan(abs(PitchMath.cents(detected: upper, expected: 2 * hz)), 10)
+            }
+        }
+    }
+
+    func testRumbleRecoveryRejectsNoiseAloneAndPreservesLowVoiceAndGlides() throws {
+        var state: UInt64 = 1234
+        for rate in [44100.0, 48000] {
+            let detector = YINPitchDetector(sampleRate: rate, config: PitchConfig())
+            for _ in 0..<20 {
+                let noise = (0..<2048).map { _ -> Float in
+                    state = state &* 6364136223846793005 &+ 1
+                    return Float((Double(state >> 40) / Double(1 << 24) - 0.5) * 0.25)
+                }
+                XCTAssertNil(detector.analyze(noise).rawFrequency)
+            }
+            for hz in [72.0, 75, 82.41, 92.5] {
+                let pitch = try XCTUnwrap(detector.analyze(tone(hz, rate: rate)).rawFrequency)
+                XCTAssertLessThan(abs(PitchMath.cents(detected: pitch, expected: hz)), 10)
+            }
+            let sweep = (0..<2048).map { i -> Float in
+                let t = Double(i) / rate
+                return Float(0.25 * sin(2 * .pi * (170 * t + 200 * t * t)))
+            }
+            let pitch = try XCTUnwrap(detector.analyze(sweep).rawFrequency)
+            XCTAssertTrue((168...192).contains(pitch), "A glide must not be halved")
+        }
+    }
+
+    func testRumbleRecoveryKeepsRejectedCompetingTonesWithoutSubBassUnvoiced() {
+        let detector = YINPitchDetector(sampleRate: 48000, config: PitchConfig())
+        for upper in [515.0, 540, 600, 620, 810] {
+            let lower = zip(tone(181, rate: 48000, amplitude: 0.17), tone(291, rate: 48000, amplitude: 0.16)).map(+)
+            let mixture = zip(lower, tone(upper, rate: 48000, amplitude: 0.20)).map(+)
+            XCTAssertNil(estimate(mixture, rate: 48000), "Original pass rejects this mixture")
+            XCTAssertNil(detector.analyze(mixture).rawFrequency, "No mains interference to recover from, upper tone \(upper)")
+        }
+    }
+
+    func testMainsHumCannotTurnAHarmonicVowelIntoALowerOctave() throws {
+        for hz in [142.0, 150, 160, 220, 235] {
+            let vowel = zip(tone(hz, amplitude: 0.14), tone(2 * hz, amplitude: 0.10)).map(+)
+            let signal = zip(vowel, tone(60, amplitude: 0.07)).map(+)
+            let detector = YINPitchDetector(sampleRate: 44100, config: PitchConfig())
+            let f = try XCTUnwrap(detector.analyze(signal).rawFrequency)
+            XCTAssertLessThan(abs(PitchMath.cents(detected: f, expected: hz)), 15, "Fundamental \(hz)")
+        }
     }
 
     func testModerateNoiseRetainsKnownFundamental() throws {

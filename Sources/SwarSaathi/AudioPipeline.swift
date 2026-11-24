@@ -30,6 +30,7 @@ final class BoundedAudioMailbox: @unchecked Sendable {
     private final class Slot {
         let samples: UnsafeMutablePointer<Float>
         var count = 0
+        var startsNewSegment = false
         var firstSampleTime = 0.0
         var sampleRate = 0.0
         var generation: UInt64 = 0
@@ -87,7 +88,7 @@ final class BoundedAudioMailbox: @unchecked Sendable {
 
     @discardableResult
     func enqueue(_ samples: UnsafePointer<Float>, count: Int, time: Double,
-                 sampleRate: Double, generation: UInt64) -> Bool {
+                 sampleRate: Double, generation: UInt64, startsNewSegment: Bool = false) -> Bool {
         lock.lock(); defer { lock.unlock() }
         guard count > 0, time.isFinite, sampleRate.isFinite, sampleRate > 0 else {
             counters.invalidPackets += 1
@@ -119,6 +120,7 @@ final class BoundedAudioMailbox: @unchecked Sendable {
         let slot = slots[index]
         slot.samples.update(from: samples, count: count)
         slot.count = count
+        slot.startsNewSegment = startsNewSegment
         slot.firstSampleTime = time
         slot.sampleRate = sampleRate
         slot.generation = generation
@@ -134,6 +136,11 @@ final class BoundedAudioMailbox: @unchecked Sendable {
 
     @discardableResult
     func consumeNext(_ body: (UnsafeBufferPointer<Float>, Double, Double, UInt64) -> Void) -> Bool {
+        consumePacket { samples, time, rate, generation, _ in body(samples, time, rate, generation) }
+    }
+
+    @discardableResult
+    func consumePacket(_ body: (UnsafeBufferPointer<Float>, Double, Double, UInt64, Bool) -> Void) -> Bool {
         lock.lock()
         guard pendingCount > 0 else { lock.unlock(); return false }
         let slot = slots[pending[head]]
@@ -145,10 +152,11 @@ final class BoundedAudioMailbox: @unchecked Sendable {
         let time = slot.firstSampleTime
         let rate = slot.sampleRate
         let packetGeneration = slot.generation
+        let startsNewSegment = slot.startsNewSegment
         counters.consumedPackets += 1
         lock.unlock()
 
-        body(UnsafeBufferPointer(start: slot.samples, count: count), time, rate, packetGeneration)
+        body(UnsafeBufferPointer(start: slot.samples, count: count), time, rate, packetGeneration, startsNewSegment)
 
         lock.lock()
         slot.leased = false

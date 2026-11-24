@@ -6,6 +6,33 @@ final class TransitionAllowanceTests: XCTestCase {
     private func row(_ t: Double, _ hz: Double?) -> PracticeObservation {
         PracticeObservation(time: t, frequency: hz, confidence: hz == nil ? 0 : 0.99)
     }
+    func testFastTempoDoesNotDoubleTheTransitionShare() {
+        let fast = PracticeTimeline(targets: timeline.notes.map(\.target), bpm: 120)
+        XCTAssertEqual(fast.transitionWindowSeconds, 0.05, accuracy: 1e-9)
+        XCTAssertFalse(fast.matchesForPractice(row(0.58, 220)))
+        XCTAssertTrue(fast.matchesForPractice(row(0.54, 220)))
+    }
+
+    func testReportsWithoutAPolicyReplayWithOriginalWindow() throws {
+        let fast = PracticeTimeline(targets: timeline.notes.map(\.target), bpm: 120)
+        let data = try JSONEncoder().encode(fast)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        json.removeValue(forKey: "transitionPolicy")
+        let legacy = try JSONDecoder().decode(PracticeTimeline.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(legacy.transitionWindowSeconds, 0.1)
+        XCTAssertTrue(legacy.matchesForPractice(row(0.58, 220)))
+        XCTAssertFalse(fast.matchesForPractice(row(0.58, 220)))
+    }
+
+    func testExactScheduledStartAlwaysSelectsNewTarget() {
+        for tempo in 40...120 {
+            let track = PracticeTimeline(targets: Alankaar.standard.targets(sa: 220, tuning: .justShuddha), bpm: Double(tempo))
+            for note in track.notes {
+                XCTAssertEqual(track.note(at: note.start)?.target.index, note.target.index, "BPM \(tempo), index \(note.target.index)")
+            }
+        }
+    }
+
     func testSmallEarlyLateChangesAndGlidesHaveExplicitAllowance() {
         XCTAssertTrue(timeline.matchesForPractice(row(0.94, 247.5)))
         XCTAssertTrue(timeline.matchesForPractice(row(1.06, 220)))

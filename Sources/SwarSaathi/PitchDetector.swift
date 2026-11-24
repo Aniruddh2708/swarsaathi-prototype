@@ -26,10 +26,13 @@ struct PitchFrame: Codable {
     let level: Double         // RMS 0...1
     let rawFrequency: Double? // independent accepted YIN F0; use for calibration/scoring
 
+    var startsNewSegment: Bool?
+
     init(time: Double, frequency: Double?, confidence: Double, level: Double,
-         rawFrequency: Double? = nil) {
+         rawFrequency: Double? = nil, startsNewSegment: Bool = false) {
         self.time = time; self.frequency = frequency
         self.confidence = confidence; self.level = level; self.rawFrequency = rawFrequency
+        self.startsNewSegment = startsNewSegment
     }
 }
 
@@ -40,6 +43,18 @@ struct PitchConfig: Codable {
     var minConfidence: Double = 0.85   // YIN: accept dips with CMND < 1 - minConfidence
     var frameSize: Int = 2048          // samples analysed per frame
     var hopSize: Int = 1024            // samples between frames (~21-23 ms)
+
+    static func forCapture(sampleRate: Double) -> PitchConfig {
+        var config = PitchConfig()
+        guard sampleRate.isFinite, (8000...192000).contains(sampleRate) else { return config }
+        // Keep at least one independent update per 40 ms scoring cell, including at
+        // faster tempos. Preserve the 44.1/48 kHz defaults.
+        while Double(config.hopSize) / sampleRate > 0.025 { config.hopSize /= 2 }
+        while Double(config.hopSize * 2) / sampleRate <= 0.025 { config.hopSize *= 2 }
+        config.frameSize = max(512, config.hopSize * 2)
+        if Double(config.frameSize - 257) < sampleRate / config.minFrequency { config.frameSize *= 2 }
+        return config
+    }
 
     func validationError(sampleRate: Double) -> String? {
         guard sampleRate.isFinite, sampleRate > 0,
@@ -74,6 +89,37 @@ final class YINPitchDetector {
     private var diff: [Float]
     private var cmnd: [Float]
     private var centered: [Float]
+    private var rumbleReduced: [Float]
+    private let mainsBases: [MainsBasis]
+
+    // Least-squares sine/cosine basis, precomputed at the actual input rate.
+    // Both columns are centred to match the analysed samples.
+    private struct MainsBasis {
+        let sine: [Double], cosine: [Double]
+        let ss: Double, cc: Double, sc: Double
+
+        init(hz: Double, rate: Double, count: Int) {
+            let step = 2 * Double.pi * hz / rate
+            let s = (0..<count).map { sin(step * Double($0)) }
+            let c = (0..<count).map { cos(step * Double($0)) }
+            let sm = s.reduce(0, +) / Double(count), cm = c.reduce(0, +) / Double(count)
+            sine = s.map { $0 - sm }; cosine = c.map { $0 - cm }
+            ss = sine.reduce(0) { $0 + $1 * $1 }
+            cc = cosine.reduce(0) { $0 + $1 * $1 }
+            sc = zip(sine, cosine).reduce(0) { $0 + $1.0 * $1.1 }
+        }
+
+        func fit(_ input: [Float]) -> (a: Double, b: Double, energy: Double) {
+            var xs = 0.0, xc = 0.0
+            for i in input.indices {
+                xs += Double(input[i]) * sine[i]
+                xc += Double(input[i]) * cosine[i]
+            }
+            let determinant = ss * cc - sc * sc
+            let a = (xs * cc - xc * sc) / determinant, b = (xc * ss - xs * sc) / determinant
+            return (a, b, a * xs + b * xc)
+        }
+    }
 
     var requiredSampleCount: Int { configurationError == nil ? window + tauMax + 1 : 0 }
     var differenceWindowSize: Int { window }
@@ -88,6 +134,10 @@ final class YINPitchDetector {
         self.window = configurationError == nil ? config.frameSize - Int(sampleRate / config.minFrequency) - 1 : 0
         self.diff = [Float](repeating: 0, count: tauMax + 2)
         self.cmnd = [Float](repeating: 1, count: tauMax + 2)
+        self.mainsBases = configurationError == nil ? [50.0, 60.0].filter { $0 < config.minFrequency }.map {
+            MainsBasis(hz: $0, rate: sampleRate, count: config.frameSize)
+        } : []
+        self.rumbleReduced = [Float](repeating: 0, count: configurationError == nil ? config.frameSize : 0)
         self.centered = [Float](repeating: 0, count: configurationError == nil ? config.frameSize : 0)
     }
 
@@ -112,12 +162,73 @@ final class YINPitchDetector {
         guard rms >= Double(config.silenceRMS) else {
             return PitchFrame(time: time, frequency: nil, confidence: 0, level: rms)
         }
-        let result = centered.withUnsafeBufferPointer { detect($0.baseAddress!) }
+        let result = estimateVoice(energy: energy)
         guard let raw = result, raw.frequency >= config.minFrequency, raw.frequency <= config.maxFrequency else {
             return PitchFrame(time: time, frequency: nil, confidence: 0, level: rms)
         }
         return PitchFrame(time: time, frequency: raw.frequency, confidence: raw.confidence,
                           level: rms, rawFrequency: raw.frequency)
+    }
+
+    private typealias Estimate = (frequency: Double, confidence: Double)
+    private typealias HumFit = (basis: MainsBasis, a: Double, b: Double)
+
+    private func estimateVoice(energy: Double) -> Estimate? {
+        let primary = centered.withUnsafeBufferPointer { detect($0.baseAddress!) }
+        guard (primary?.confidence ?? 0) < 0.985, let hum = mainsFit(energy: energy),
+              let filtered = estimateWithoutRumble() else { return primary }
+        guard let primary else { return filtered }
+        guard abs(PitchMath.cents(detected: filtered.frequency, expected: primary.frequency)) > 600 else {
+            return primary
+        }
+        // Two plausible but incompatible registers. Subtract only the fitted
+        // mains sinusoid and require independent agreement before choosing.
+        guard let verified = estimateRemoving(hum) else { return nil }
+        if abs(PitchMath.cents(detected: verified.frequency, expected: filtered.frequency)) <= 30 { return filtered }
+        if abs(PitchMath.cents(detected: verified.frequency, expected: primary.frequency)) <= 30 { return primary }
+        return nil
+    }
+
+    private func estimateWithoutRumble() -> Estimate? {
+        // A symmetric second difference suppresses very slow motion. All three
+        // samples are inside the captured window; the shorter YIN window needs no padding.
+        let stride = max(1, Int((sampleRate * 0.0005).rounded()))
+        let length = centered.count - 2 * stride
+        guard window - 2 * stride >= 256 else { return nil }
+        var energy = 0.0
+        for i in 0..<length {
+            let value = centered[i + stride] * 2 - centered[i] - centered[i + 2 * stride]
+            rumbleReduced[i] = value
+            energy += Double(value) * Double(value)
+        }
+        let gate = Double(config.silenceRMS)
+        guard energy >= Double(length) * gate * gate else { return nil }
+        return rumbleReduced.withUnsafeBufferPointer { estimate($0.baseAddress!, windowLength: window - 2 * stride) }
+    }
+
+    private func estimateRemoving(_ hum: HumFit) -> Estimate? {
+        var energy = 0.0
+        for i in centered.indices {
+            let residual = Double(centered[i]) - hum.a * hum.basis.sine[i] - hum.b * hum.basis.cosine[i]
+            rumbleReduced[i] = Float(residual)
+            energy += residual * residual
+        }
+        let gate = Double(config.silenceRMS)
+        guard energy >= Double(centered.count) * gate * gate else { return nil }
+        return rumbleReduced.withUnsafeBufferPointer { detect($0.baseAddress!) }
+    }
+
+    private func mainsFit(energy: Double) -> HumFit? {
+        var best: HumFit?
+        var minimum = 0.10 * energy
+        for basis in mainsBases {
+            let fit = basis.fit(centered)
+            if fit.energy > minimum {
+                minimum = fit.energy
+                best = (basis, fit.a, fit.b)
+            }
+        }
+        return best
     }
 
     func analyze(_ samples: [Float], time: Double = 0) -> PitchFrame {
@@ -135,12 +246,11 @@ final class YINPitchDetector {
     func differenceValues(_ samples: [Float]) -> [Float]? {
         guard configurationError == nil, samples.count >= requiredSampleCount,
               samples.prefix(requiredSampleCount).allSatisfy({ $0.isFinite }) else { return nil }
-        samples.withUnsafeBufferPointer { computeDifference($0.baseAddress!) }
+        samples.withUnsafeBufferPointer { computeDifference($0.baseAddress!, windowLength: window) }
         return Array(diff.prefix(tauMax + 1))
     }
 
-    private func computeDifference(_ x: UnsafePointer<Float>) {
-        let n = window
+    private func computeDifference(_ x: UnsafePointer<Float>, windowLength n: Int) {
         let vn = vDSP_Length(n)
         var e0: Float = 0
         vDSP_svesq(x, 1, &e0, vn)
@@ -157,9 +267,13 @@ final class YINPitchDetector {
 
     /// `x` must point to at least `tauMax + window + 1` samples (DC-removed).
     func detect(_ x: UnsafePointer<Float>) -> (frequency: Double, confidence: Double)? {
+        estimate(x, windowLength: window)
+    }
+
+    private func estimate(_ x: UnsafePointer<Float>, windowLength: Int) -> (frequency: Double, confidence: Double)? {
         guard configurationError == nil else { return nil }
         // Step 1 preserves the supplied constant-window energy/dot formulation.
-        computeDifference(x)
+        computeDifference(x, windowLength: windowLength)
 
         // Step 2: cumulative mean normalised difference
         cmnd[0] = 1
@@ -183,6 +297,16 @@ final class YINPitchDetector {
         }
         if tauEst < 0 { return nil }   // no reliable periodicity -> reject
 
+        // A strong second harmonic can make half a cycle look periodic. Require
+        // a substantial absolute AND relative improvement around twice that lag.
+        // Pure tones also repeat at twice their period, with no such improvement.
+        if cmnd[tauEst] > 0.025, 2 * tauEst + 2 < tauMax {
+            let center = 2 * tauEst
+            var candidate = center
+            for lag in (center - 2)...(center + 2) where cmnd[lag] < cmnd[candidate] { candidate = lag }
+            if cmnd[candidate] < cmnd[tauEst] * 0.20 { tauEst = candidate }
+        }
+
         // Step 4: parabolic interpolation for sub-sample accuracy
         var better = Double(tauEst)
         let s0 = cmnd[tauEst - 1], s1 = cmnd[tauEst], s2 = cmnd[tauEst + 1]
@@ -200,35 +324,41 @@ final class YINPitchDetector {
 struct PitchSmoother {
     private var history: [Double] = []
     private var missing = 0
-    private var octaveCandidates = 0
+    private var newPitchCandidate: Double?
     private var lastOutput: Double?
 
     mutating func reset() {
-        history.removeAll(); missing = 0; octaveCandidates = 0; lastOutput = nil
+        history.removeAll(); missing = 0; newPitchCandidate = nil; lastOutput = nil
     }
 
     mutating func process(_ raw: Double?) -> Double? {
         guard let f = raw else {
             missing += 1
-            octaveCandidates = 0
+            newPitchCandidate = nil
             if missing >= 3 { history.removeAll(); lastOutput = nil }
             return nil // unvoiced observations always break the graph immediately
         }
         guard f.isFinite, f > 0 else { return process(nil) }
         missing = 0
 
-        // A sudden jump of exactly one octave is usually an estimation error.
-        // Accept it only if it persists for several frames.
-        if history.count >= 3, let ref = PitchMath.median(history) {
-            let c = 1200 * log2(f / ref)
-            if abs(abs(c) - 1200) < 70 {
-                octaveCandidates += 1
-                if octaveCandidates < 4 { return lastOutput }
-                history.removeAll()
+        // Two agreeing raw frames establish a new note. An isolated octave
+        // spike still cannot move the trace. Only the display uses this state.
+        if history.count >= 2, let last = lastOutput,
+           abs(PitchMath.cents(detected: f, expected: last)) >= 90 {
+            if let previous = newPitchCandidate, abs(PitchMath.cents(detected: f, expected: previous)) < 45 {
+                history.removeAll(keepingCapacity: true)
+                history.append(previous)
                 lastOutput = nil
+                newPitchCandidate = nil
             } else {
-                octaveCandidates = 0
+                let isolated = newPitchCandidate == nil
+                newPitchCandidate = f
+                if isolated { return lastOutput }
+                // A continuing glide may have no pair within 45 cents. Let the
+                // median follow its actual samples instead of freezing the trace.
             }
+        } else {
+            newPitchCandidate = nil
         }
 
         history.append(f)

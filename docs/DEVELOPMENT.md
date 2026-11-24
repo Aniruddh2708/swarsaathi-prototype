@@ -74,6 +74,41 @@ The utility reads the report and runs its observations through the production
 scorer. It does not alter the observations or upload the report.
 `SWARSAATHI_SWIFTC` can select a compiler on Linux.
 
+## Validate an independently labelled recording
+
+Use a mono, 16-bit PCM WAV and a headerless CSV with increasing time in seconds
+and reference frequency in Hz. Include unvoiced instants as zero on a regular
+time grid spanning the complete recording. Preserve the file time origin.
+
+```sh
+sh scripts/validate_recording.sh singer.wav reference.csv
+```
+
+The utility runs the production pitch detector on overlapping PCM windows at
+the file's sample rate. It associates each reference time with the nearest
+window centre within half a hop. Times outside the available windows have no
+detected pitch. It counts all supplied labels, including silence, missing
+voiced detections, false voicing, and errors within 50 cents of an octave.
+Median and p95 pitch error are conditional on both sources reporting voice.
+The within-50-cent rate uses every reference-voiced instant as its denominator.
+The command uses the Swift compiler selected by `SWARSAATHI_SWIFTC` or `PATH`.
+
+## Physical-device validation
+
+| Question | Evidence to collect |
+| --- | --- |
+| Does the microphone capture each take? | Repeat permission, recording, cancellation, stop/restart, route changes, interruptions and backgrounding on the supported iPhones and iPads. Test built-in, wired and Bluetooth inputs. Record OS version, route, actual rate and diagnostic counters for each attempt. |
+| Can singers follow the guide in time? | Use an externally synchronized pitched onset and a high-frame-rate recording of the sound and screen. Measure onset to visible feedback across routes, tempos and device load. Compare with the report's capture-centre-to-main-delivery p95; this telemetry excludes screen rendering and acoustic delay. |
+| Which voices and environments work? | With consent, collect a held-out set across low/high registers, voice qualities, ornaments, noise and room acoustics. Independently label F0 and voicing. Report per-singer pitch error, missed and false voicing, octave errors and within-band coverage. Keep clean and noisy conditions separate. |
+| Is the suggested Sa comfortable? | Collect repeated low/middle/high takes. Have singers and teachers independently select comfortable tonics before revealing the suggestion. Record agreement in cents, confirmation or adjustment and exercise availability. |
+| Does the percentage reflect the exercise? | Have teachers mark timing, intonation and transitions independently at several tempos. Include a missing note, silence, early stop, late entry and wrong octave. Compare with strict match, practice match and captured/voiced slot counts. |
+| Is practice usable over time? | Check low-tone audibility, count-in visibility/haptics, real note-change display delay, sustained CPU, memory, battery, heat, queue loss and recovery on the oldest supported hardware. |
+
+Keep raw recordings and participant reports private. Set release criteria for the
+intended singers and routes before evaluating held-out results. An offline WAV
+comparison exercises DSP; device validation also covers the entire capture,
+display and playback path.
+
 ## Contribution guidelines
 
 - Keep microphone observations independent of expected targets.

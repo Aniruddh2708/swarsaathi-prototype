@@ -21,8 +21,11 @@ struct PracticeView: View {
                     ErrorBanner(message: b)
                 }
 
-                if vm.phase == .finished {
-                    SummaryView(summary: vm.summary, results: vm.results,
+                if vm.phase == .finishing {
+                    ProgressView("Finishing recording…")
+                } else if vm.phase == .finished, let summary = vm.finishedSummary {
+                    SummaryView(summary: summary, results: vm.results, bpm: vm.bpm, captureWarning: vm.captureWarning,
+                                timingWasEstimated: vm.timingWasEstimated,
                                 targets: vm.targets, auditURL: vm.auditURL) { vm.prepareAgain() }
                 } else {
                     if vm.phase == .idle { configurationCard }

@@ -60,6 +60,8 @@ attempt. The application does not silently join separate recordings.
 cards show the result for each swar. Wrong notes, missing voice, and unreliable
 input reduce the percentage.
 
+The result shows the tempo and how much of the exercise contained reliable voice. A recording with a detected microphone or timing gap asks for a retry. Details keep the measured counts.
+
 The main metric allows brief adjacent-note transitions. Under **Details**, the
 result without that transition allowance and the proportion of reliable voice
 are available separately. The percentage describes this exercise at the selected

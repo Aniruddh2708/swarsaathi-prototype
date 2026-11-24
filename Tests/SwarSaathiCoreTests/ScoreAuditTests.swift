@@ -45,6 +45,7 @@ final class ScoreAuditTests: XCTestCase {
 
     func testHandCountedPercentagesIncludeEveryExpectedCell() {
         let report = timeline.score(observations: mixedObservations())
+        XCTAssertEqual(report.results.compactMap(\.observedCells), [25, 20, 25, 12, 25])
         XCTAssertEqual(report.results.map(\.expectedFrames), [25, 25, 25, 25, 25])
         XCTAssertEqual(report.results.map(\.correctFrames), [25, 15, 0, 10, 20])
         XCTAssertEqual(report.results.map(\.transitionAcceptedFrames), [0, 2, 0, 2, 0])
