@@ -2,7 +2,7 @@ name: Swift checks
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'research/audio-sprint-02']
   pull_request:
 
 permissions:
@@ -23,3 +23,16 @@ jobs:
           xcodebuild -project SwarSaathi.xcodeproj -scheme SwarSaathi
           -configuration Debug -destination 'generic/platform=iOS Simulator'
           -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO build
+
+      - name: Development recording diagnostics (not holdout)
+        if: github.ref == 'refs/heads/research/audio-sprint-02'
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/vocadito"
+          root=https://raw.githubusercontent.com/mir-dataset-loaders/mirdata/96d298b5ec4b7c5dadcd498a3b50a0204b8c3a85/tests/resources/mir_datasets/vocadito
+          curl --fail --location --retry 2 "$root/Audio/vocadito_1.wav" -o "$RUNNER_TEMP/vocadito/voice.wav"
+          curl --fail --location --retry 2 "$root/Annotations/F0/vocadito_1_f0.csv" -o "$RUNNER_TEMP/vocadito/reference.csv"
+          shasum -a 256 "$RUNNER_TEMP/vocadito/voice.wav" "$RUNNER_TEMP/vocadito/reference.csv"
+          for mode in baseline gain2 long-window; do
+            sh scripts/diagnose_development_recording.sh "$RUNNER_TEMP/vocadito/voice.wav" "$RUNNER_TEMP/vocadito/reference.csv" "$mode"
+          done

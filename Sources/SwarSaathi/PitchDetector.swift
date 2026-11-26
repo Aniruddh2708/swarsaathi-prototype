@@ -78,7 +78,10 @@ struct PitchConfig: Codable {
 
 /// YIN fundamental-frequency estimator (de Cheveigné & Kawahara, 2002).
 /// Difference function is computed with vDSP dot products (Accelerate).
+enum PitchRejection: String, Codable { case invalidInput, belowRMS, noReliablePeriodicity, conflictingHumEstimates, outsideRange }
 final class YINPitchDetector {
+    // Worker-confined diagnostic; no changes to pitch acceptance or scoring.
+    private(set) var lastAnalysisRejection: PitchRejection?
     private let sampleRate: Double
     private let threshold: Float
     private let tauMin: Int
@@ -144,6 +147,7 @@ final class YINPitchDetector {
     /// Checked, shared preprocessing for file/unit tests and capture workers.
     /// Reuses scratch storage; this object is confined to one processing queue.
     func analyze(_ samples: UnsafePointer<Float>, count: Int, time: Double) -> PitchFrame {
+        lastAnalysisRejection = .invalidInput
         let empty = PitchFrame(time: time, frequency: nil, confidence: 0, level: 0)
         guard configurationError == nil, count >= config.frameSize, time.isFinite else { return empty }
         let n = config.frameSize
@@ -160,12 +164,19 @@ final class YINPitchDetector {
         }
         let rms = sqrt(energy / Double(n))
         guard rms >= Double(config.silenceRMS) else {
+            lastAnalysisRejection = .belowRMS
             return PitchFrame(time: time, frequency: nil, confidence: 0, level: rms)
         }
+        lastAnalysisRejection = .noReliablePeriodicity
         let result = estimateVoice(energy: energy)
-        guard let raw = result, raw.frequency >= config.minFrequency, raw.frequency <= config.maxFrequency else {
+        guard let raw = result else {
             return PitchFrame(time: time, frequency: nil, confidence: 0, level: rms)
         }
+        guard raw.frequency >= config.minFrequency, raw.frequency <= config.maxFrequency else {
+            lastAnalysisRejection = .outsideRange
+            return PitchFrame(time: time, frequency: nil, confidence: 0, level: rms)
+        }
+        lastAnalysisRejection = nil
         return PitchFrame(time: time, frequency: raw.frequency, confidence: raw.confidence,
                           level: rms, rawFrequency: raw.frequency)
     }
@@ -183,9 +194,10 @@ final class YINPitchDetector {
         }
         // Two plausible but incompatible registers. Subtract only the fitted
         // mains sinusoid and require independent agreement before choosing.
-        guard let verified = estimateRemoving(hum) else { return nil }
+        guard let verified = estimateRemoving(hum) else { lastAnalysisRejection = .conflictingHumEstimates; return nil }
         if abs(PitchMath.cents(detected: verified.frequency, expected: filtered.frequency)) <= 30 { return filtered }
         if abs(PitchMath.cents(detected: verified.frequency, expected: primary.frequency)) <= 30 { return primary }
+        lastAnalysisRejection = .conflictingHumEstimates
         return nil
     }
 
@@ -232,7 +244,7 @@ final class YINPitchDetector {
     }
 
     func analyze(_ samples: [Float], time: Double = 0) -> PitchFrame {
-        guard !samples.isEmpty else { return PitchFrame(time: time, frequency: nil, confidence: 0, level: 0) }
+        guard !samples.isEmpty else { lastAnalysisRejection = .invalidInput; return PitchFrame(time: time, frequency: nil, confidence: 0, level: 0) }
         return samples.withUnsafeBufferPointer { analyze($0.baseAddress!, count: samples.count, time: time) }
     }
 
