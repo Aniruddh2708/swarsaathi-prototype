@@ -1,4 +1,5 @@
 import Foundation
+import Dispatch
 
 /// Offline comparison. The detector receives PCM only. Reference labels enter
 /// after inference, including all labelled silence and acquisition edges.
@@ -45,6 +46,11 @@ struct DiagnoseDevelopmentRecording {
 
     struct Metrics: Encodable {
         var experiment = "baseline"
+        var sampleRate: Double = 0
+        var frameSize = 0, hopSize = 0, analyzedWindows = 0
+        var windowMs: Double = 0, hopMs: Double = 0
+        var processingMedianMs: Double?
+        var processingP95Ms: Double?
         var missedReasons: [String: Int] = [:]
         var labelledInstants = 0, referenceVoiced = 0, referenceUnvoiced = 0
         var voicedDetected = 0, falseVoiced = 0, missedVoiced = 0
@@ -76,11 +82,16 @@ struct DiagnoseDevelopmentRecording {
         if let error = detector.configurationError { throw InputError(message: error) }
         var pitches: [Double?] = []
         var rejections: [String] = []
+        var processingTimes: [Double] = []
         samples.withUnsafeBufferPointer { pcm in
             var offset = 0
             while offset + config.frameSize <= pcm.count {
-                pitches.append(detector.analyze(pcm.baseAddress! + offset, count: config.frameSize,
-                                                time: Double(offset + config.frameSize / 2) / audio.rate).rawFrequency)
+                let start = DispatchTime.now().uptimeNanoseconds
+                let frame = detector.analyze(pcm.baseAddress! + offset, count: config.frameSize,
+                                             time: Double(offset + config.frameSize / 2) / audio.rate)
+                let elapsed = DispatchTime.now().uptimeNanoseconds - start
+                processingTimes.append(Double(elapsed) / 1_000_000)
+                pitches.append(frame.rawFrequency)
                 rejections.append(detector.lastAnalysisRejection?.rawValue ?? "accepted")
                 offset += config.hopSize
             }
@@ -88,6 +99,17 @@ struct DiagnoseDevelopmentRecording {
         let csv = try String(contentsOfFile: CommandLine.arguments[2], encoding: .utf8)
         var metrics = Metrics(), errors: [Double] = [], previousTime = -Double.infinity
         metrics.experiment = mode
+        metrics.sampleRate = audio.rate
+        metrics.frameSize = config.frameSize
+        metrics.hopSize = config.hopSize
+        metrics.analyzedWindows = pitches.count
+        metrics.windowMs = 1000 * Double(config.frameSize) / audio.rate
+        metrics.hopMs = 1000 * Double(config.hopSize) / audio.rate
+        metrics.processingMedianMs = PitchMath.median(processingTimes)
+        if !processingTimes.isEmpty {
+            let sorted = processingTimes.sorted()
+            metrics.processingP95Ms = sorted[Int(ceil(0.95 * Double(sorted.count))) - 1]
+        }
         var intervals: [Double] = [], firstTime: Double?
         for (index, line) in csv.split(whereSeparator: \.isNewline).enumerated() {
             let columns = line.split(separator: ",", omittingEmptySubsequences: false)
