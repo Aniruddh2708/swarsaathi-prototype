@@ -2,7 +2,7 @@ name: Swift checks
 
 on:
   push:
-    branches: [main, 'research/audio-sprint-02', 'research/audio-sprint-03']
+    branches: [main, 'research/audio-sprint-02', 'research/audio-sprint-03', 'research/audio-sprint-04']
   pull_request:
 
 permissions:
@@ -68,3 +68,21 @@ jobs:
           echo 'dea40fd18f14d899643c4ba221b33a46  vocadito.zip' > "$d/MD5"
           (cd "$d" && md5 -r vocadito.zip && test "$(md5 -q vocadito.zip)" = dea40fd18f14d899643c4ba221b33a46)
           python3 scripts/run_voicing_corpus.py "$d/vocadito.zip" "$PWD/.build/diagnose-development-recording" "$d/corpus"
+
+      - name: Sprint 04 attribution and offline playback experiment
+        if: github.ref == 'refs/heads/research/audio-sprint-04'
+        run: |
+          set -eu
+          d="$RUNNER_TEMP/sprint04"
+          mkdir -p "$d"
+          curl --fail --location --retry 2 --max-time 180 'https://zenodo.org/records/5578807/files/vocadito.zip?download=1' -o "$d/vocadito.zip"
+          test "$(md5 -q "$d/vocadito.zip")" = dea40fd18f14d899643c4ba221b33a46
+          swiftc -O Sources/SwarSaathi/MusicTheory.swift Sources/SwarSaathi/PitchDetector.swift Sources/SwarSaathi/ExperimentalVoicing.swift Sources/SwarSaathi/PlaybackResearch.swift Tools/Sprint04Experiment.swift -o "$d/experiment"
+          python3 scripts/run_sprint04.py "$d/vocadito.zip" "$d/experiment" "$d/results"
+      - name: Archive public development diagnostics
+        if: github.ref == 'refs/heads/research/audio-sprint-04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sprint04-public-diagnostics
+          path: ${{ runner.temp }}/sprint04/results/*.json
+          if-no-files-found: error
