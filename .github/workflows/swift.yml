@@ -2,7 +2,7 @@ name: Swift checks
 
 on:
   push:
-    branches: [main, 'research/audio-sprint-02']
+    branches: [main, 'research/audio-sprint-02', 'research/audio-sprint-03']
   pull_request:
 
 permissions:
@@ -36,3 +36,35 @@ jobs:
           for mode in baseline gain2 long-window; do
             sh scripts/diagnose_development_recording.sh "$RUNNER_TEMP/vocadito/voice.wav" "$RUNNER_TEMP/vocadito/reference.csv" "$mode"
           done
+
+      - name: Sprint 03 fixed fixture and synthetic controls
+        if: github.ref == 'refs/heads/research/audio-sprint-03'
+        run: |
+          set -eu
+          d="$RUNNER_TEMP/voicing"
+          mkdir -p "$d"
+          root=https://raw.githubusercontent.com/mir-dataset-loaders/mirdata/96d298b5ec4b7c5dadcd498a3b50a0204b8c3a85/tests/resources/mir_datasets/vocadito
+          curl --fail --location --retry 2 "$root/Audio/vocadito_1.wav" -o "$d/voice.wav"
+          curl --fail --location --retry 2 "$root/Annotations/F0/vocadito_1_f0.csv" -o "$d/reference.csv"
+          shasum -a 256 "$d/voice.wav" "$d/reference.csv"
+          sh scripts/diagnose_development_recording.sh "$d/voice.wav" "$d/reference.csv" baseline
+          bin="$PWD/.build/diagnose-development-recording"
+          for mode in level-aware adaptive-gate bounded-normalization gain2; do
+            "$bin" "$d/voice.wav" "$d/reference.csv" "$mode"
+          done
+          python3 scripts/generate_voicing_controls.py "$d/controls"
+          for wav in "$d"/controls/*.wav; do
+            for mode in baseline level-aware adaptive-gate bounded-normalization; do
+              echo "SYNTHETIC_CONTROL $(basename "$wav") $mode"
+              "$bin" "$wav" "${wav%.wav}.csv" "$mode" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin),separators=(",",":")))'
+            done
+          done
+      - name: Additional annotated development corpus (not holdout)
+        if: github.ref == 'refs/heads/research/audio-sprint-03'
+        run: |
+          set -eu
+          d="$RUNNER_TEMP/voicing"
+          curl --fail --location --retry 2 --max-time 180 'https://zenodo.org/records/5578807/files/vocadito.zip?download=1' -o "$d/vocadito.zip"
+          echo 'dea40fd18f14d899643c4ba221b33a46  vocadito.zip' > "$d/MD5"
+          (cd "$d" && md5 -r vocadito.zip && test "$(md5 -q vocadito.zip)" = dea40fd18f14d899643c4ba221b33a46)
+          python3 scripts/run_voicing_corpus.py "$d/vocadito.zip" "$PWD/.build/diagnose-development-recording" "$d/corpus"

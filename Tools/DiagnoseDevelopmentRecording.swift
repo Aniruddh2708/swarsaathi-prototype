@@ -44,8 +44,23 @@ struct DiagnoseDevelopmentRecording {
         }
     }
 
+    struct EnergyBand: Encodable {
+        var voiced = 0, unvoiced = 0, missed = 0, falseVoiced = 0
+    }
+    static func band(_ rms: Double) -> String {
+        if rms < 0.002 { return "lt0.002" }
+        if rms < 0.004 { return "0.002-0.004" }
+        if rms < 0.008 { return "0.004-0.008" }
+        if rms < 0.016 { return "0.008-0.016" }
+        return "ge0.016"
+    }
     struct Metrics: Encodable {
         var experiment = "baseline"
+        var octaveOffsets: [String: Int] = [:]
+        var energyBands: [String: EnergyBand] = [:]
+        var windowStages: [String: Int] = [:]
+        var recoveredReferenceVoiced = 0, recoveredReferenceUnvoiced = 0
+        var noiseProxyMedianRMS: Double?
         var sampleRate: Double = 0
         var frameSize = 0, hopSize = 0, analyzedWindows = 0
         var windowMs: Double = 0, hopMs: Double = 0
@@ -70,35 +85,56 @@ struct DiagnoseDevelopmentRecording {
 
     private static func compare() throws {
         guard CommandLine.arguments.count == 4 else {
-            throw InputError(message: "Usage: diagnose_development_recording.sh mono.wav reference.csv baseline|gain2|long-window")
+            throw InputError(message: "Usage: diagnose_development_recording.sh mono.wav reference.csv baseline|gain2|long-window|level-aware|adaptive-gate|bounded-normalization")
         }
         let audio = try Audio(url: URL(fileURLWithPath: CommandLine.arguments[1]))
         let mode = CommandLine.arguments[3]
-        guard ["baseline", "gain2", "long-window"].contains(mode) else { throw InputError(message: "Unknown experiment") }
+        let experimental = VoicingExperiment(rawValue: mode)
+        guard ["baseline", "gain2", "long-window"].contains(mode) || experimental != nil else { throw InputError(message: "Unknown experiment") }
         var config = PitchConfig.forCapture(sampleRate: audio.rate)
         if mode == "long-window" { config.frameSize *= 2 }
         let samples = mode == "gain2" ? audio.samples.map { $0 * 2 } : audio.samples
         let detector = YINPitchDetector(sampleRate: audio.rate, config: config)
         if let error = detector.configurationError { throw InputError(message: error) }
+        let alternate = experimental.map { ExperimentalVoicing(sampleRate: audio.rate, config: config, mode: $0) }
+        if let error = alternate?.configurationError { throw InputError(message: error) }
         var pitches: [Double?] = []
+        var levels: [Double] = []
+        var stages: [String] = []
+        var proxies: [Double] = []
         var rejections: [String] = []
         var processingTimes: [Double] = []
         samples.withUnsafeBufferPointer { pcm in
             var offset = 0
             while offset + config.frameSize <= pcm.count {
                 let start = DispatchTime.now().uptimeNanoseconds
-                let frame = detector.analyze(pcm.baseAddress! + offset, count: config.frameSize,
-                                             time: Double(offset + config.frameSize / 2) / audio.rate)
+                let t = Double(offset + config.frameSize / 2) / audio.rate
+                let frame: PitchFrame
+                if let alternate {
+                    frame = alternate.analyze(pcm.baseAddress! + offset, count: config.frameSize, time: t)
+                } else {
+                    frame = detector.analyze(pcm.baseAddress! + offset, count: config.frameSize, time: t)
+                }
                 let elapsed = DispatchTime.now().uptimeNanoseconds - start
                 processingTimes.append(Double(elapsed) / 1_000_000)
                 pitches.append(frame.rawFrequency)
-                rejections.append(detector.lastAnalysisRejection?.rawValue ?? "accepted")
+                levels.append(frame.level)
+                if let alternate {
+                    stages.append(alternate.stage.rawValue)
+                    if let proxy = alternate.noiseProxy { proxies.append(proxy) }
+                    rejections.append(frame.rawFrequency == nil ? (alternate.baselineRejection?.rawValue ?? "unknown") : "accepted")
+                } else {
+                    stages.append(frame.rawFrequency == nil ? "baselineRejected" : "baselineAccepted")
+                    rejections.append(detector.lastAnalysisRejection?.rawValue ?? "accepted")
+                }
                 offset += config.hopSize
             }
         }
         let csv = try String(contentsOfFile: CommandLine.arguments[2], encoding: .utf8)
         var metrics = Metrics(), errors: [Double] = [], previousTime = -Double.infinity
         metrics.experiment = mode
+        for stage in stages { metrics.windowStages[stage, default: 0] += 1 }
+        metrics.noiseProxyMedianRMS = PitchMath.median(proxies)
         metrics.sampleRate = audio.rate
         metrics.frameSize = config.frameSize
         metrics.hopSize = config.hopSize
@@ -124,14 +160,24 @@ struct DiagnoseDevelopmentRecording {
             previousTime = t
             let nearest = Int(((t * audio.rate - Double(config.frameSize) / 2) / Double(config.hopSize)).rounded())
             let observed = pitches.indices.contains(nearest) ? pitches[nearest] : nil
+            let energyBand = levels.indices.contains(nearest) ? band(levels[nearest]) : "noWindow"
+            let recovered = stages.indices.contains(nearest) && stages[nearest] == RecoveryStage.recovered.rawValue
             metrics.labelledInstants += 1
             if hz == 0 {
                 metrics.referenceUnvoiced += 1
-                if observed != nil { metrics.falseVoiced += 1 }
+                metrics.energyBands[energyBand, default: EnergyBand()].unvoiced += 1
+                if recovered { metrics.recoveredReferenceUnvoiced += 1 }
+                if observed != nil {
+                    metrics.falseVoiced += 1
+                    metrics.energyBands[energyBand, default: EnergyBand()].falseVoiced += 1
+                }
             } else {
                 metrics.referenceVoiced += 1
+                metrics.energyBands[energyBand, default: EnergyBand()].voiced += 1
+                if recovered { metrics.recoveredReferenceVoiced += 1 }
                 guard let f = observed else {
                     metrics.missedVoiced += 1
+                    metrics.energyBands[energyBand, default: EnergyBand()].missed += 1
                     let reason = rejections.indices.contains(nearest) ? rejections[nearest] : "noWindowAtLabel"
                     metrics.missedReasons[reason, default: 0] += 1
                     continue
@@ -140,7 +186,10 @@ struct DiagnoseDevelopmentRecording {
                 let error = abs(PitchMath.cents(detected: f, expected: hz))
                 errors.append(error)
                 if error <= 50 { metrics.within50Cents += 1 }
-                if abs(error - 1200) <= 50 { metrics.octaveErrors += 1 }
+                if let octave = DevelopmentOctaveError.offset(detected: f, reference: hz) {
+                    metrics.octaveErrors += 1
+                    metrics.octaveOffsets[String(octave), default: 0] += 1
+                }
             }
         }
         guard let step = PitchMath.median(intervals), let firstTime,

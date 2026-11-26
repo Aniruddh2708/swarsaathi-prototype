@@ -151,7 +151,10 @@ struct FocusEvidenceExtractor {
     }
     /// Fixed reliable comparison set; requires improved matches at distinct
     /// transition boundaries. Does not realign timestamps or award credit.
-    private func hasConsistentTimingShift(_ observations: [PracticeObservation], timeline: PracticeTimeline) -> Bool {
+    // Internal comparison seam for QA; production research policy remains two.
+    func hasConsistentTimingShift(_ observations: [PracticeObservation], timeline: PracticeTimeline,
+                                  minimumTransitions: Int = 2) -> Bool {
+        guard minimumTransitions == 2 || minimumTransitions == 3 else { return false }
         let set = observations.filter { $0.isReliable && $0.time >= 0.2 && $0.time < timeline.duration-0.2 }
         guard set.count >= 10 else { return false }
         let boundaries = timeline.notes.dropFirst().map(\.start)
@@ -169,7 +172,7 @@ struct FocusEvidenceExtractor {
             let improvedBoundaries = boundaries.filter { boundary in
                 set.indices.contains { !original[$0] && candidate[$0] && abs(set[$0].time-boundary) <= 0.2 }
             }
-            if improvedBoundaries.count >= 2 { return true }
+            if improvedBoundaries.count >= minimumTransitions { return true }
         }
         return false
     }
