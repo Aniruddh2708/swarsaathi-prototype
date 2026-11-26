@@ -14,7 +14,11 @@ final class PlaybackResearchTests: XCTestCase {
         XCTAssertEqual(model.delay,7); XCTAssertEqual(model.gain,0.5,accuracy:1e-8)
         let ref=(0..<512).map{Float(0.1*sin(Double($0)*0.1))}
         let voice=ref.map{$0*0.3}
-        let mixed=(0..<ref.count).map{voice[$0]+($0>=7 ? ref[$0-7]*0.5:0)}
+        var mixed: [Float] = voice
+        for i in 7..<ref.count {
+            let leak: Float = ref[i-7] * 0.5
+            mixed[i] += leak
+        }
         let out=try XCTUnwrap(model.subtract(reference:ref,microphone:mixed))
         for i in voice.indices { XCTAssertEqual(out[i],voice[i],accuracy:1e-7) }
     }

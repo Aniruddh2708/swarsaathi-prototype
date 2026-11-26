@@ -1,5 +1,5 @@
 """Fixed development excerpts only; retain per-label diagnostics and print summaries."""
-import hashlib, json, subprocess, sys, zipfile
+import hashlib, json, statistics, subprocess, sys, zipfile
 from pathlib import Path
 archive,binary,dest=map(Path,sys.argv[1:4])
 dest.mkdir(parents=True,exist_ok=True)
@@ -18,7 +18,18 @@ with zipfile.ZipFile(archive) as z:
         print("S04_FIXTURE",stem,hashlib.sha256(a.read_bytes()).hexdigest(),hashlib.sha256(b.read_bytes()).hexdigest(),flush=True)
         result=run("attribution",a,b)
         write(stem+"-attribution",result)
-        del result["events"]
+        events=result.pop("events")
+        false=[e for e in events if e["kind"]=="falseVoiced"]
+        interior=[e for e in false if (e.get("boundaryMs") is None or e["boundaryMs"]>100)]
+        def describe(es):
+            def med(key):
+                v=[e[key] for e in es if e.get(key) is not None]
+                return statistics.median(v) if v else None
+            return dict(n=len(es),allWindowUnvoiced=sum(e.get("windowVoicedFraction")==0 for e in es),
+                        medianDetectedCorrelation=med("correlationDetected"),medianRMS=med("rms"),
+                        medianConfidence=med("confidence"),medianDetectedHz=med("detectedHz"))
+        result["falseSignalStats"]=describe(false)
+        result["interiorFalseSignalStats"]=describe(interior)
         print("S04_ATTRIBUTION",stem,json.dumps(result,separators=(",",":")),flush=True)
         if track in [3,5]:
             mixture=run("mixture",a,b)

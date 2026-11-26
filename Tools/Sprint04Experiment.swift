@@ -139,7 +139,7 @@ struct Sprint04Experiment {
             let nearby=rows.filter { abs($0.time-l.time)<=0.100 && $0.hz>0 }
             let matches=nearby.contains { abs(PitchMath.cents(detected:f,expected:$0.hz))<=50 }
             let inside=rows.filter { abs($0.time-p.time)<=Double(a.config.frameSize)/2/audio.rate }
-            let fraction=inside.isEmpty ? nil : Double(inside.filter{$0.hz>0}.count)/Double(inside.count)
+            let fraction: Double? = inside.isEmpty ? nil : Double(inside.filter{$0.hz>0}.count)/Double(inside.count)
             let c1=AttributionResearch.correlation(samples:audio.samples,start:i*a.config.hopSize,count:a.config.frameSize,lag:Int((audio.rate/f).rounded()))
             let c2=l.hz>0 ? AttributionResearch.correlation(samples:audio.samples,start:i*a.config.hopSize,count:a.config.frameSize,lag:Int((audio.rate/l.hz).rounded())) : nil
             if octave != nil {
@@ -178,7 +178,8 @@ struct Sprint04Experiment {
     }
     static func rms(_ a:[Float]) -> Double { sqrt(a.reduce(0.0){$0+Double($1)*Double($1)}/Double(max(1,a.count))) }
     static func mixture(_ voice:[Float],_ rows:[Label],rate:Double,source:String) throws -> [MixtureResult] {
-        let delay=Int(rate*0.004), maxDelay=delay+32
+        let delay: Int = Int(rate * 0.004)
+        let maxDelay: Int = delay + 32
         var state:UInt64=2601
         let probe=(0..<4096).map { _ -> Float in
             state=state &* 6364136223846793005 &+ 1
@@ -198,9 +199,14 @@ struct Sprint04Experiment {
         }
         // Playback-like continuous harmonic signal. Matching-note stress case uses
         // a singer waveform at the same fundamental; no adaptation during singing.
-        let reference=(0..<voice.count).map { i -> Float in
-            let t=Double(i)/rate
-            return Float(0.12*sin(2*Double.pi*275*t)+0.035*sin(2*Double.pi*550*t))
+        var reference: [Float] = []
+        reference.reserveCapacity(voice.count)
+        for i in 0..<voice.count {
+            let t: Double = Double(i)/rate
+            let phase: Double = 2 * Double.pi * 275 * t
+            let primary: Double = 0.12 * sin(phase)
+            let harmonic: Double = 0.035 * sin(2 * phase)
+            reference.append(Float(primary + harmonic))
         }
         let clean=infer(voice,rate:rate)
         let specs:[(String,Int,Double,Bool)]=[("matched",delay,0.5,false),("gainChanged",delay,0.65,false),
@@ -245,10 +251,14 @@ struct Sprint04Experiment {
             let rate=44100.0, n=Int(rate*3)
             var all:[MixtureResult]=[]
             for f in [0.0,220,275] {
-                let voice=(0..<n).map { i -> Float in
-                    let t=Double(i)/rate
-                    guard t>=0.75,t<2.25,f>0 else { return 0 }
-                    return Float(0.035*sin(2*Double.pi*f*t+0.7)+0.01*sin(4*Double.pi*f*t+0.2))
+                var voice = [Float](repeating: 0, count: n)
+                for i in 0..<n {
+                    let t: Double = Double(i)/rate
+                    if t < 0.75 || t >= 2.25 || f <= 0 { continue }
+                    let phase: Double = 2 * Double.pi * f * t
+                    let primary: Double = 0.035 * sin(phase + 0.7)
+                    let harmonic: Double = 0.01 * sin(2 * phase + 0.2)
+                    voice[i] = Float(primary + harmonic)
                 }
                 let r=(0..<300).map { i -> Label in
                     let t=Double(i)/100
